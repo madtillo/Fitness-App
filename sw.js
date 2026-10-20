@@ -1,6 +1,7 @@
 /* Offline-Betrieb: App-Dateien werden auf dem Gerät zwischengespeichert.
-   Open-Food-Facts-Anfragen gehen immer direkt ins Netz (Produkte speichert die App selbst). */
-const CACHE = "tills-fitness-v3";
+   Strategie „zuerst Netz“: Mit Internet lädt die App immer die aktuelle Version,
+   ohne Internet die zuletzt gespeicherte. Open-Food-Facts-Anfragen gehen nie über den Cache. */
+const CACHE = "tills-fitness-v4";
 const SHELL = [
   "./", "index.html", "manifest.webmanifest",
   "app-extra.css", "localdb.js", "nutrition.js", "scan.js", "app.js",
@@ -9,7 +10,7 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting()));
 });
 self.addEventListener("message", (e) => { if (e.data === "skipWaiting") self.skipWaiting(); });
 self.addEventListener("activate", (e) => {
@@ -18,16 +19,19 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
-  if (url.hostname.endsWith("openfoodfacts.org") && url.pathname.startsWith("/api/")) return; // nie aus dem Cache
+  if (url.hostname.endsWith("openfoodfacts.org")) return;
   const sameOrigin = url.origin === self.location.origin;
   const isFont = url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com";
   if (!sameOrigin && !isFont) return;
-  // App-Dateien: zuerst Cache (schnell + offline), im Hintergrund aktualisiert der Service Worker beim nächsten Update.
-  e.respondWith(caches.match(e.request, { ignoreSearch: sameOrigin }).then((hit) => {
-    if (hit) return hit;
-    return fetch(e.request).then((res) => {
-      if (res && (res.ok || res.type === "opaque") && (isFont || sameOrigin)) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
+  // Große Scanner-Datei ändert sich nie → aus dem Cache (schnell, spart Daten)
+  if (sameOrigin && url.pathname.endsWith(".wasm")) {
+    e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request)));
+    return;
+  }
+  e.respondWith(
+    fetch(e.request, sameOrigin ? { cache: "no-cache" } : undefined).then((res) => {
+      if (res && (res.ok || res.type === "opaque")) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
       return res;
-    }).catch(() => (e.request.mode === "navigate" ? caches.match("index.html") : Response.error()));
-  }));
+    }).catch(() => caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || (e.request.mode === "navigate" ? caches.match("index.html") : Response.error())))
+  );
 });
