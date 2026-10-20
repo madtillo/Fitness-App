@@ -1,6 +1,6 @@
 /* Offline-Betrieb: App-Dateien werden auf dem Gerät zwischengespeichert.
    Open-Food-Facts-Anfragen gehen immer direkt ins Netz (Produkte speichert die App selbst). */
-const CACHE = "tills-fitness-v1";
+const CACHE = "tills-fitness-v2";
 const SHELL = [
   "./", "index.html", "manifest.webmanifest",
   "app-extra.css", "localdb.js", "nutrition.js", "scan.js", "app.js",

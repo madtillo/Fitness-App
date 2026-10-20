@@ -1,3 +1,5 @@
+/* Ausgeblendete Bereiche immer verstecken (in der Claude-Version kam diese Regel vom Rahmen der Seite). */
+[hidden]{display:none!important}
 /* Ergänzungen für die eigenständige App: Safe-Area, Scanner, Daten-Menü, Hinweise.
    Nutzt dieselben Farb-Variablen wie die bestehende App (hell/dunkel automatisch). */
 .shell{padding-top:calc(14px + env(safe-area-inset-top,0px))}
