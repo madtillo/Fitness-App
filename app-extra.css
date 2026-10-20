@@ -88,3 +88,6 @@ body{padding-bottom:calc(48px + env(safe-area-inset-bottom,0px))}
 #appToast[hidden]{display:none}
 #updBar{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:35;background:var(--accent);color:var(--accent-ink);border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:center;justify-content:space-between;font-weight:600}
 #updBar button{font:600 .9rem var(--body);background:var(--accent-ink);color:var(--accent);border:0;border-radius:8px;padding:8px 12px}
+
+/* Teller-Legende: nur die äußere Zeile ist ein Raster, der Text darin fließt normal (sonst überlappen Titel und Beschreibung). */
+#mod-food .legend div div{display:block;min-width:0}
