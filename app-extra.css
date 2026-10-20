@@ -91,3 +91,35 @@ body{padding-bottom:calc(48px + env(safe-area-inset-bottom,0px))}
 
 /* Teller-Legende: nur die äußere Zeile ist ein Raster, der Text darin fließt normal (sonst überlappen Titel und Beschreibung). */
 #mod-food .legend div div{display:block;min-width:0}
+
+/* Kopfzeile: Knöpfe rechts gruppiert */
+.shell-top .topbtns{display:flex;gap:8px}
+/* Ausführliche Erklärungen */
+#docSheet{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center}
+.dc-sheet{height:94vh;height:94dvh}
+.dc-body{position:relative}
+.sc-head .dc-back{font-size:1.4rem;line-height:1}
+.dc-pick{display:grid;gap:4px;text-align:left;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;color:var(--fg);font:inherit;cursor:pointer}
+.dc-pick b{font-size:1.1rem}
+.dc-pick span{color:var(--muted);font-size:.88rem}
+.dc-toc{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+.dc-toc a{flex:none;font-size:.8rem;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 10px;text-decoration:none;white-space:nowrap}
+.dc-doc{font-size:.95rem;line-height:1.55}
+.dc-doc h2{font-family:var(--display);font-size:1.3rem;text-transform:uppercase;letter-spacing:.02em;margin:22px 0 6px;scroll-margin-top:8px}
+.dc-doc h2:first-child{margin-top:4px}
+.dc-doc p{margin:8px 0}
+.dc-doc ul,.dc-doc ol{margin:6px 0;padding-left:22px}
+.dc-doc li{margin:3px 0}
+.dc-tbl{overflow-x:auto;margin:10px 0;-webkit-overflow-scrolling:touch}
+.dc-doc table{border-collapse:collapse;font-size:.85rem;min-width:100%}
+.dc-doc th,.dc-doc td{text-align:left;vertical-align:top;padding:6px 8px;border-bottom:1px solid var(--line)}
+.dc-doc th{color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
+.dc-body{overflow-x:hidden}
+.dc-body>*{min-width:0;max-width:100%}
+.dc-doc{min-width:0;overflow-wrap:anywhere}
+.dc-tbl{max-width:100%}
+.dc-doc table{min-width:0;width:100%}
+.dc-doc td,.dc-doc th{overflow-wrap:normal;word-break:normal;hyphens:auto;min-width:5.5em}
+.dc-body{display:block}
+.dc-body>*+*{margin-top:12px}
+.dc-toc{min-height:max-content}
