@@ -1,0 +1,1097 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tills Fitness</title>
+<meta name="description" content="Trainingsplan, Ernährungs-Zähler mit Barcode-Scanner und Trainingslog">
+<meta name="theme-color" content="#F2F4F6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E141A" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fitness">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<script src="localdb.js"></script>
+<script src="nutrition.js"></script>
+<script src="barcode-detector-ponyfill.js"></script>
+<script src="scan.js"></script>
+<script src="app.js"></script>
+</head>
+<body>
+<style>
+/* Layout: one app, three modules (Plan, Essen, Log) under a segmented switcher */
+:root{
+  --bg:#F2F4F6; --surface:#FFFFFF; --fg:#16202A; --muted:#5B6874; --line:#D7DDE3;
+  --accent:#1F5BD0; --accent-ink:#FFFFFF; --soft:#E6EDFA;
+  --veg:#2E8B57; --prot:#C0562B; --carb:#C99A1E; --fat:#7A6A58;
+  --good:#1E7A4C; --amber:#B86E00; --bad:#B3261E; --warn:#B3261E; --mid:#9A6B00;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E141A; --surface:#17202A; --fg:#E5EAEF; --muted:#98A5B1; --line:#2A3542;
+  --accent:#7AA2FF; --accent-ink:#0E141A; --soft:#1C2A44;
+  --veg:#5CC48E; --prot:#F08A5D; --carb:#E8C25A; --fat:#B9A893;
+  --good:#5CC48E; --amber:#F0B45A; --bad:#FF8A80; --warn:#FF8A80; --mid:#F0B45A; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E141A; --surface:#17202A; --fg:#E5EAEF; --muted:#98A5B1; --line:#2A3542;
+  --accent:#7AA2FF; --accent-ink:#0E141A; --soft:#1C2A44;
+  --veg:#5CC48E; --prot:#F08A5D; --carb:#E8C25A; --fat:#B9A893;
+  --good:#5CC48E; --amber:#F0B45A; --bad:#FF8A80; --warn:#FF8A80; --mid:#F0B45A; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 48px}
+.shell{max-width:640px;margin:0 auto;padding-top:18px}
+.shell-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.shell-top h1{font-family:var(--display);font-weight:700;font-size:2rem;margin:0;line-height:1;text-transform:uppercase;letter-spacing:.01em}
+.main-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:4px;margin-top:12px}
+.main-nav button{font:700 .95rem var(--display);text-transform:uppercase;letter-spacing:.04em;padding:9px 4px;border:0;border-radius:9px;background:none;color:var(--muted);cursor:pointer}
+.main-nav button[aria-selected="true"]{background:var(--fg);color:var(--bg)}
+.main-nav button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+#mod-plan .wrap{max-width:640px;margin:0 auto}
+#mod-plan header{padding-block:20px 6px;display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap}
+#mod-plan h1{font-family:var(--display);font-weight:700;font-size:2.1rem;margin:0;line-height:1;text-transform:uppercase;letter-spacing:.01em}
+#mod-plan .log{font:600 .85rem var(--body);color:var(--accent);text-decoration:none;border:1px solid var(--accent);border-radius:999px;padding:6px 12px}
+#mod-plan nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:10px;display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+#mod-plan nav button{font:600 .85rem var(--body);padding:8px 2px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer;line-height:1.15}
+#mod-plan nav button small{display:block;font-weight:500;font-size:.7rem;color:var(--muted)}
+#mod-plan nav button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+#mod-plan nav button[aria-selected="true"] small{color:var(--accent-ink);opacity:.8}
+#mod-plan .week{background:var(--soft);border-radius:10px;padding:10px 12px;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline}
+#mod-plan .week b{font-family:var(--display);font-size:1.15rem;text-transform:uppercase;letter-spacing:.03em}
+#mod-plan .week span{font-size:.88rem}
+#mod-plan .unit-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-top:16px}
+#mod-plan h2{font-family:var(--display);font-weight:600;font-size:1.5rem;text-transform:uppercase;letter-spacing:.02em;margin:0}
+#mod-plan .meta{font-family:var(--mono);font-size:.82rem;color:var(--muted);white-space:nowrap}
+#mod-plan .list{display:grid;gap:10px;margin-top:12px}
+#mod-plan .ex{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:6px}
+#mod-plan .ex.pair{border-left:3px solid var(--accent)}
+#mod-plan .top{display:flex;justify-content:space-between;gap:10px;align-items:start}
+#mod-plan .ex h3{margin:0;font-size:1.02rem;font-weight:600;min-width:0}
+#mod-plan .ex h3 .no{font-family:var(--mono);color:var(--muted);font-weight:500;margin-right:6px}
+#mod-plan .dose{font-family:var(--mono);font-size:.95rem;white-space:nowrap;font-variant-numeric:tabular-nums}
+#mod-plan .dose small{display:block;text-align:right;color:var(--muted);font-size:.72rem}
+#mod-plan ul.cues{margin:0;padding-left:18px;font-size:.9rem}
+#mod-plan .alt{font-size:.82rem;color:var(--muted)}
+#mod-plan .vid{justify-self:start;font:600 .85rem var(--body);color:var(--accent);text-decoration:none;display:inline-flex;gap:6px;align-items:center;padding:4px 0}
+#mod-plan .vids{display:flex;flex-wrap:wrap;gap:4px 16px}
+#mod-plan .lang{font:600 .65rem var(--mono);border:1px solid currentColor;border-radius:3px;padding:0 3px}
+#mod-plan .vid svg{width:16px;height:16px;fill:currentColor}
+#mod-plan .tag{font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent)}
+#mod-plan details.box{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:12px}
+#mod-plan details.box summary{cursor:pointer;font-weight:600}
+#mod-plan details.box ul,#mod-plan details.box ol{margin:8px 0 0;padding-left:20px;font-size:.9rem;display:grid;gap:4px}
+#mod-plan .warn{color:var(--warn)}
+#mod-plan .run{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:.92rem;margin-top:8px}
+#mod-plan .run b{font-family:var(--mono)}
+#mod-plan a:focus-visible,#mod-plan button:focus-visible,#mod-plan summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#mod-plan .foot{font-size:.8rem;color:var(--muted);margin-top:18px}
+@media (max-width:380px){#mod-plan nav button{font-size:.78rem}}
+#mod-plan .golog{font:600 .85rem var(--body);background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:9px 14px;cursor:pointer;margin-top:10px}
+#mod-food .wrap{max-width:640px;margin:0 auto}
+#mod-food header{padding-block:20px 6px;display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap}
+#mod-food h1{font-family:var(--display);font-weight:700;font-size:2.1rem;margin:0;line-height:1;text-transform:uppercase;letter-spacing:.01em}
+#mod-food .links{display:flex;gap:8px;flex-wrap:wrap}
+#mod-food .links a{font:600 .8rem var(--body);color:var(--accent);text-decoration:none;border:1px solid var(--accent);border-radius:999px;padding:5px 11px}
+#mod-food .goal{background:var(--soft);border-radius:10px;padding:10px 12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+#mod-food .goal div b{display:block;font-family:var(--mono);font-size:1.05rem;font-variant-numeric:tabular-nums}
+#mod-food .goal div span{font-size:.72rem;color:var(--muted)}
+#mod-food nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:10px;display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+#mod-food nav button{font:600 .76rem var(--body);padding:9px 1px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer}
+#mod-food nav button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+#mod-food section{display:grid;gap:14px;padding-top:6px}
+#mod-food h2{font-family:var(--display);font-weight:600;font-size:1.4rem;text-transform:uppercase;letter-spacing:.02em;margin:8px 0 0}
+#mod-food .seg{display:flex;gap:6px;flex-wrap:wrap}
+#mod-food .seg button{font:600 .85rem var(--body);padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer}
+#mod-food .seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+#mod-food .tl{display:grid;gap:0}
+#mod-food .meal{display:grid;grid-template-columns:3.6rem 1fr;gap:12px;position:relative;padding-bottom:14px}
+#mod-food .meal::before{content:"";position:absolute;left:1.8rem;top:1.6rem;bottom:0;width:2px;background:var(--line)}
+#mod-food .meal:last-child::before{display:none}
+#mod-food .time{font-family:var(--mono);font-size:.82rem;color:var(--muted);text-align:right;padding-top:12px}
+#mod-food .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:4px;min-width:0}
+#mod-food .card.opt{border-style:dashed}
+#mod-food .card.hl{border-color:var(--accent)}
+#mod-food .card .t{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+#mod-food .card h3{margin:0;font-size:1rem;font-weight:600}
+#mod-food .p{font-family:var(--mono);font-size:.82rem;color:var(--prot);white-space:nowrap}
+#mod-food .card p{margin:0;font-size:.9rem}
+#mod-food .card .note{font-size:.8rem;color:var(--muted)}
+#mod-food .bar{display:grid;gap:4px}
+#mod-food .bar .track{height:10px;border-radius:5px;background:var(--line);overflow:hidden}
+#mod-food .bar .fill{height:100%;background:var(--prot)}
+#mod-food .bar .lbl{display:flex;justify-content:space-between;font-size:.8rem;color:var(--muted);font-family:var(--mono)}
+#mod-food .plate{display:grid;grid-template-columns:150px 1fr;gap:16px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px}
+@media (max-width:420px){#mod-food .plate{grid-template-columns:1fr;justify-items:center}}
+#mod-food .plate svg{width:150px;height:150px}
+#mod-food .legend{display:grid;gap:8px;font-size:.9rem;min-width:0}
+#mod-food .legend div{display:grid;grid-template-columns:14px 1fr;gap:8px;align-items:start}
+#mod-food .sw{width:14px;height:14px;border-radius:3px;margin-top:3px}
+#mod-food .legend b{font-weight:600}
+#mod-food .legend small{display:block;color:var(--muted);font-size:.78rem}
+#mod-food .rc{background:var(--surface);border:1px solid var(--line);border-radius:10px}
+#mod-food .rc summary{list-style:none;cursor:pointer;padding:12px;display:grid;gap:6px}
+#mod-food .rc summary::-webkit-details-marker{display:none}
+#mod-food .rc .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+#mod-food .rc h3{margin:0;font-size:1.02rem}
+#mod-food .chips{display:flex;gap:6px;flex-wrap:wrap}
+#mod-food .chip{font:500 .75rem var(--mono);border:1px solid var(--line);border-radius:999px;padding:2px 8px;white-space:nowrap}
+#mod-food .chip.pr{color:var(--prot);border-color:currentColor}
+#mod-food .rc .body{padding:0 12px 12px;display:grid;gap:10px;font-size:.9rem}
+#mod-food .rc ul,#mod-food .rc ol{margin:0;padding-left:20px;display:grid;gap:2px}
+#mod-food .more{font-size:.78rem;color:var(--accent);font-weight:600}
+#mod-food .rc[open] .more{display:none}
+#mod-food .steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:8px}
+#mod-food .steps li{display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:start;font-size:.92rem}
+#mod-food .steps li::before{counter-increment:s;content:counter(s);font:600 .85rem var(--mono);width:28px;height:28px;border-radius:50%;background:var(--soft);color:var(--accent);display:grid;place-items:center}
+#mod-food .shop{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+#mod-food .shop h3{margin:0 0 6px;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+#mod-food .shop label{display:flex;gap:10px;align-items:center;padding:5px 0;font-size:.95rem;cursor:pointer}
+#mod-food .shop input{width:18px;height:18px;accent-color:var(--accent)}
+#mod-food .shop input:checked+span{text-decoration:line-through;color:var(--muted)}
+#mod-food .btn{font:600 .85rem var(--body);background:none;border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--fg);cursor:pointer;justify-self:start}
+#mod-food .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:420px){#mod-food .grid2{grid-template-columns:1fr}}
+#mod-food .mini{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:3px;min-width:0}
+#mod-food .mini b{font-size:.95rem}
+#mod-food .mini span{font-size:.82rem;color:var(--muted)}
+#mod-food .rule{display:grid;grid-template-columns:10px 1fr;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
+#mod-food .rule i{border-radius:5px}
+#mod-food .rule b{display:block;font-size:.92rem}
+#mod-food .rule span{font-size:.85rem;color:var(--muted)}
+#mod-food .warnbox{border:1.5px solid var(--warn);border-radius:10px;padding:10px 12px;display:grid;gap:6px;font-size:.9rem}
+#mod-food .warnbox h3{margin:0;color:var(--warn);font-size:1rem}
+#mod-food .warnbox p{margin:0}
+#mod-food .sup{display:grid;grid-template-columns:1fr auto;gap:2px 10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+#mod-food .sup b{font-size:.95rem}
+#mod-food .sup .st{font:600 .72rem var(--body);text-transform:uppercase;letter-spacing:.04em;border-radius:999px;padding:2px 8px;align-self:start;white-space:nowrap}
+#mod-food .st.yes{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+#mod-food .st.opt{background:color-mix(in srgb,var(--mid) 18%,transparent);color:var(--mid)}
+#mod-food .st.no{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+#mod-food .sup span{grid-column:1/-1;font-size:.84rem;color:var(--muted)}
+#mod-food .zrow{display:flex;align-items:center;gap:10px;margin-top:6px}
+#mod-food .zl{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+#mod-food .zrow input,#mod-food .zbox input{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0;width:100%}
+#mod-food .zrow input{width:auto}
+#mod-food .zsum{display:grid;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px}
+#mod-food .zm{display:grid;gap:4px}
+#mod-food .zm .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+#mod-food .zm b{font-size:.92rem}
+#mod-food .zm .v{font-family:var(--mono);font-size:.82rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+#mod-food .zm .left{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+#mod-food .zm .left.done{color:var(--good)}
+#mod-food .zm .left.over{color:var(--warn)}
+#mod-food .zm .track{height:9px;border-radius:5px;background:var(--line);overflow:hidden}
+#mod-food .zm .fill{height:100%;border-radius:5px}
+#mod-food .zbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:8px}
+#mod-food .zbox h3{margin:0;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+#mod-food .zchips{display:flex;flex-wrap:wrap;gap:6px}
+#mod-food .zchips button{font:500 .82rem var(--body);border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:999px;padding:6px 10px;cursor:pointer}
+#mod-food .zchips button small{color:var(--prot);font-family:var(--mono);font-size:.72rem;margin-left:4px}
+#mod-food .zgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+#mod-food .zgrid label{display:grid;gap:3px;font-size:.72rem;color:var(--muted);min-width:0}
+#mod-food .zadd{font:600 .9rem var(--body);background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:10px;cursor:pointer}
+#mod-food .zitem{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:.9rem}
+#mod-food .zitem:last-child{border-bottom:0}
+#mod-food .zitem .n{min-width:0;overflow-wrap:anywhere}
+#mod-food .zitem .m{font-family:var(--mono);font-size:.75rem;color:var(--muted);white-space:nowrap}
+#mod-food .zitem button{border:0;background:none;color:var(--muted);font-size:1.1rem;cursor:pointer;padding:2px 6px}
+@media (max-width:380px){#mod-food .zgrid{grid-template-columns:repeat(2,1fr)}}
+#mod-food a:focus-visible,#mod-food button:focus-visible,#mod-food summary:focus-visible,#mod-food input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#mod-food .foot{font-size:.8rem;color:var(--muted);margin-top:16px}
+#mod-log .wrap{max-width:640px;margin:0 auto}
+#mod-log header{padding-block:20px 8px}
+#mod-log h1{font-family:var(--display);font-weight:700;font-size:2.1rem;letter-spacing:.01em;margin:0;line-height:1;text-transform:uppercase}
+#mod-log .sub{color:var(--muted);font-size:.85rem;margin-top:4px}
+#mod-log nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;border-bottom:1px solid var(--line)}
+#mod-log nav button{font:600 .9rem var(--body);padding:9px 4px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer}
+#mod-log nav button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+#mod-log section{display:grid;gap:16px;padding-top:16px}
+#mod-log h2{font-family:var(--display);font-weight:600;font-size:1.35rem;text-transform:uppercase;letter-spacing:.03em;margin:0}
+#mod-log label,#mod-log .lbl{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+#mod-log .row{display:flex;flex-wrap:wrap;gap:12px}
+#mod-log .field{display:grid;gap:4px;flex:1 1 140px;min-width:0}
+#mod-log input,#mod-log textarea,#mod-log select{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%;min-width:0}
+#mod-log input:focus-visible,#mod-log textarea:focus-visible,#mod-log button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#mod-log textarea{min-height:64px;resize:vertical}
+#mod-log .seg{display:flex;flex-wrap:wrap;gap:6px}
+#mod-log .seg button,#mod-log .chips button{font:600 .9rem var(--body);padding:8px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer}
+#mod-log .seg button[aria-pressed="true"],#mod-log .chips button[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+#mod-log .chips{display:flex;gap:6px}
+#mod-log .chips button{min-width:40px;padding:7px 0;flex:1;font-family:var(--mono)}
+#mod-log .scale{font-size:.75rem;color:var(--muted);display:flex;justify-content:space-between}
+#mod-log .ex{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:8px}
+#mod-log .ex h3{margin:0;font-size:1rem;font-weight:600}
+#mod-log .last{font-size:.8rem;color:var(--muted);font-family:var(--mono)}
+#mod-log .sets{display:grid;grid-template-columns:2.2rem 1fr 1fr;gap:6px 8px;align-items:center}
+#mod-log #p-training{position:relative}
+#mod-log .calbtn{position:absolute;top:12px;right:0;width:32px;height:32px;display:grid;place-items:center;background:none;border:0;border-radius:8px;color:var(--muted);cursor:pointer;padding:0}
+#mod-log .calbtn:hover{color:var(--fg);background:var(--surface)}
+#mod-log .calbtn svg{width:19px;height:19px}
+#mod-log .t-date-field{padding-right:40px}
+#calSheet{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center}
+#calSheet[hidden]{display:none}
+#calSheet .sheet{background:var(--bg);color:var(--fg);width:100%;max-width:560px;max-height:88vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(20px + env(safe-area-inset-bottom,0px));border:1px solid var(--line);display:grid;gap:12px}
+#calSheet .top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+#calSheet .top b{font-weight:600;font-size:1rem}
+#calSheet .ib{width:36px;height:36px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);font:600 1rem var(--body);cursor:pointer}
+#calSheet .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center}
+#calSheet .wd{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;padding-bottom:2px}
+#calSheet .d{position:relative;aspect-ratio:1;max-height:46px;border:1px solid transparent;border-radius:8px;background:none;color:var(--muted);font:500 .9rem var(--mono);cursor:default;padding:0}
+#calSheet .d.has{color:var(--fg);background:var(--surface);border-color:var(--line);cursor:pointer;font-weight:600}
+#calSheet .d.has::after{content:"";position:absolute;left:50%;bottom:5px;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:var(--accent)}
+#calSheet .d.today{border-color:var(--muted)}
+#calSheet .d[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+#calSheet .d[aria-pressed="true"]::after{background:var(--bg)}
+#calSheet .day{display:grid;gap:10px}
+#calSheet .card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;gap:6px}
+#calSheet .card h4{margin:0;font-size:.95rem;font-weight:600}
+#calSheet .card h4 .tag{font-family:var(--mono);font-size:.72rem;border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin-right:6px;font-weight:500}
+#calSheet .exr{display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:.85rem;border-top:1px solid var(--line);padding-top:6px}
+#calSheet .exr .v{grid-column:1/-1;color:var(--muted);font-size:.78rem}
+#calSheet .exr .s{font-family:var(--mono);text-align:right;white-space:nowrap}
+#calSheet .muted{color:var(--muted);font-size:.85rem}
+#mod-log .sets.bw{grid-template-columns:2.2rem 1fr}
+#mod-log .typ{font-size:.72rem;font-family:var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px;margin-left:8px;font-weight:500;vertical-align:middle}
+#mod-log .sets .n{font-family:var(--mono);color:var(--muted);font-size:.85rem}
+#mod-log .sets .h{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+#mod-log .link{background:none;border:0;color:var(--accent);font:600 .85rem var(--body);padding:4px 0;cursor:pointer;justify-self:start}
+#mod-log .primary{font:600 1rem var(--body);background:var(--accent);color:var(--accent-ink);border:0;border-radius:10px;padding:13px;cursor:pointer;width:100%}
+#mod-log .primary:disabled{opacity:.5;cursor:not-allowed}
+#mod-log .note{font-size:.85rem;color:var(--muted)}
+#mod-log .banner{border:1px solid var(--amber);color:var(--amber);border-radius:8px;padding:10px;font-size:.85rem}
+#mod-log .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:999px;font-weight:600;font-size:.9rem;z-index:10}
+#mod-log .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+#mod-log .stat{border-top:2px solid var(--fg);padding-top:6px}
+#mod-log .stat b{display:block;font-family:var(--mono);font-size:1.15rem;font-variant-numeric:tabular-nums}
+#mod-log .stat span{font-size:.75rem;color:var(--muted)}
+#mod-log .tbl{overflow-x:auto}
+#mod-log table{border-collapse:collapse;width:100%;font-size:.88rem;font-variant-numeric:tabular-nums}
+#mod-log th,#mod-log td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+#mod-log th{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+#mod-log td.num{font-family:var(--mono)}
+#mod-log details{border-bottom:1px solid var(--line);padding-block:8px}
+#mod-log summary{cursor:pointer;font-weight:500}
+#mod-log summary .tag{font-family:var(--mono);font-size:.75rem;border:1px solid var(--line);border-radius:4px;padding:1px 6px;margin-right:6px}
+#mod-log .detail{font-family:var(--mono);font-size:.82rem;color:var(--muted);padding-top:6px;white-space:pre-wrap}
+#mod-log .weeknav{display:flex;align-items:center;justify-content:space-between;gap:8px}
+#mod-log .weeknav button{font:600 1rem var(--body);background:var(--surface);border:1px solid var(--line);border-radius:8px;width:40px;height:36px;color:var(--fg);cursor:pointer}
+#mod-log .weeknav b{font-family:var(--mono)}
+#mod-log svg text{fill:var(--muted);font:11px var(--mono)}
+@media (prefers-reduced-motion:reduce){}
+</style>
+<div class="shell">
+  <div class="shell-top"><h1>Fitness</h1></div>
+  <div class="main-nav" role="tablist" id="mainnav">
+    <button role="tab" data-m="plan" aria-selected="true">Training</button>
+    <button role="tab" data-m="food" aria-selected="false">Ernährung</button>
+    <button role="tab" data-m="log" aria-selected="false">Eintragen</button>
+  </div>
+</div>
+<div id="mod-plan">
+
+<div class="wrap">
+
+<div class="week" id="pweek"></div>
+<nav role="tablist" id="ptabs"></nav>
+<main id="punit"></main>
+
+<details class="box">
+  <summary>Aufwärmen (6–8 Min, vor jeder Einheit)</summary>
+  <ol>
+    <li>2–3 Min locker bewegen: Hampelmann, auf der Stelle laufen oder Stepper.</li>
+    <li>Je 10×: Armkreisen, Schulterblätter zusammen/auseinander im Liegestütz, Kniebeugen ohne Gewicht.</li>
+    <li>1–2 leichte Sätze der ersten Übung.</li>
+  </ol>
+</details>
+<details class="box">
+  <summary>Die wichtigsten Regeln</summary>
+  <ul>
+    <li><b>RIR</b> = Wiederholungen, die noch gegangen wären. RIR 2: aufhören, wenn noch 2 gingen.</li>
+    <li><b>Steigern:</b> Alle Sätze am oberen Ende geschafft → nächstes Mal schwerer (+1–2 kg oder nächste Stufe).</li>
+    <li><b>Nicht geschafft:</b> Gewicht/Stufe gleich lassen, nächstes Mal 1 Wdh mehr.</li>
+    <li><b>Startgewicht:</b> Lieber zu leicht. Mehr als 4 Wdh Reserve → schwerer.</li>
+    <li><b>Schlecht geschlafen oder kaputt:</b> Stress-Version machen. Zählt als Einheit.</li>
+    <li><b>Verpasst:</b> Nicht nachholen, einfach mit der nächsten weitermachen.</li>
+    <li><b>Stechender Schmerz im Gelenk:</b> Übung stoppen, nächstes Mal die Alternative.</li>
+    <li><b>Normal:</b> hoher Puls, schnelles Atmen, Schwitzen, Muskelbrennen. Beruhigt sich in der Pause.</li>
+    <li class="warn"><b>Abbrechen + Arzt:</b> Druck/Schmerz in der Brust, Ohnmachtsgefühl, Atemnot in Ruhe. Bei starken Beschwerden 112.</li>
+  </ul>
+</details>
+<p class="foot">Videos sind kurze YouTube-Clips (Shorts, unter 3 Min) zu genau dieser Übung. „EN“ = englisch. Ausführliche Erklärungen stehen im Dokument „Trainingsplan Phase 1“.</p>
+</div>
+
+</div>
+<div id="mod-food" hidden>
+
+<div class="wrap">
+
+<div class="goal">
+  <div><b>≥ 140 g</b><span>Eiweiß pro Tag</span></div>
+  <div><b>≈ 2.700</b><span>kcal (Startschätzung)</span></div>
+  <div><b>2,5–3 l</b><span>Wasser</span></div>
+</div>
+<nav role="tablist" id="ftabs">
+  <button role="tab" data-t="zaehl" aria-selected="true">Zähler</button>
+  <button role="tab" data-t="tag" aria-selected="false">Plan</button>
+  <button role="tab" data-t="rezepte" aria-selected="false">Rezepte</button>
+  <button role="tab" data-t="einkauf" aria-selected="false">Einkauf</button>
+  <button role="tab" data-t="flex" aria-selected="false">Snacks</button>
+  <button role="tab" data-t="regeln" aria-selected="false">Regeln</button>
+</nav>
+
+<!-- MEIN TAG -->
+<section id="s-zaehl">
+  <div class="zrow">
+    <label for="z-date" class="zl">Tag</label><input type="date" id="z-date">
+  </div>
+  <div id="z-note" class="foot" style="margin:0" hidden></div>
+  <div class="zsum" id="z-sum"></div>
+  <button type="button" class="zscan" id="z-scan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M16.5 8v8"/></svg>Barcode scannen</button>
+  <div class="zbox">
+    <h3>Schnell hinzufügen</h3>
+    <div class="zchips" id="z-quick"></div>
+    <div id="z-recent-wrap" hidden><h3 style="margin-top:10px">Zuletzt hinzugefügt</h3><div class="zchips" id="z-recent"></div></div>
+  </div>
+  <form class="zbox" id="z-form" autocomplete="off">
+    <h3>Eigener Eintrag</h3>
+    <input id="z-name" placeholder="z. B. Frosta Hähnchen-Pfanne" aria-label="Lebensmittel">
+    <div class="zgrid">
+      <label>kcal<input id="z-kcal" inputmode="decimal"></label>
+      <label>Eiweiß g<input id="z-p" inputmode="decimal"></label>
+      <label>Fett g<input id="z-f" inputmode="decimal"></label>
+      <label>KH g<input id="z-c" inputmode="decimal"></label>
+    </div>
+    <button type="submit" class="zadd">Hinzufügen</button>
+    <span class="foot" style="margin:0">Werte von der Packung (oft „pro 100 g“ – auf deine Menge umrechnen). Leere Felder zählen als unbekannt.</span>
+  </form>
+  <div class="zbox"><h3>Heute gegessen</h3><div id="z-list"></div></div>
+  <p class="foot" style="margin:0">Schnell-Werte sind Schätzungen (±15 %). Ziele: ca. 2.700 kcal · mind. 140 g Eiweiß · Fett 65–85 g · Kohlenhydrate ca. 320 g.</p>
+</section>
+
+<section id="s-tag" hidden>
+  <div class="seg" id="dayseg">
+    <button data-d="work" aria-pressed="true">Werktag</button>
+    <button data-d="train" aria-pressed="false">Trainingstag</button>
+    <button data-d="weekend" aria-pressed="false">Wochenende</button>
+  </div>
+  <div class="tl" id="timeline"></div>
+  <div class="bar" id="pbar"></div>
+
+  <h2>Der Teller</h2>
+  <div class="plate">
+    <svg viewBox="0 0 150 150" role="img" aria-label="Teller: halb Gemüse, ein Viertel Eiweiß, ein Viertel Kohlenhydrate">
+      <circle cx="75" cy="75" r="72" fill="var(--surface)" stroke="var(--line)" stroke-width="2"/>
+      <path d="M75 75 L75 9 A66 66 0 0 0 75 141 Z" fill="var(--veg)"/>
+      <path d="M75 75 L75 9 A66 66 0 0 1 141 75 Z" fill="var(--prot)"/>
+      <path d="M75 75 L141 75 A66 66 0 0 1 75 141 Z" fill="var(--carb)"/>
+      <circle cx="75" cy="75" r="66" fill="none" stroke="var(--surface)" stroke-width="2"/>
+      <line x1="75" y1="9" x2="75" y2="141" stroke="var(--surface)" stroke-width="3"/>
+      <line x1="75" y1="75" x2="141" y2="75" stroke="var(--surface)" stroke-width="3"/>
+    </svg>
+    <div class="legend">
+      <div><i class="sw" style="background:var(--veg)"></i><div><b>½ Gemüse</b><small>2 Fäuste: TK-Gemüse, Salat, Paprika, Karotten</small></div></div>
+      <div><i class="sw" style="background:var(--prot)"></i><div><b>¼ Eiweiß</b><small>1–2 Handflächen: Fleisch, Hack, Eier, Skyr</small></div></div>
+      <div><i class="sw" style="background:var(--carb)"></i><div><b>¼ Kohlenhydrate</b><small>1–2 Fäuste, Trainingstag eher 2: Reis, Nudeln, Kartoffeln</small></div></div>
+      <div><i class="sw" style="background:var(--fat)"></i><div><b>+ 1 Daumen Fett</b><small>Öl, Käse, Butter, Soße</small></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- REZEPTE -->
+<section id="s-rezepte" hidden>
+  <ol class="steps" style="margin-top:8px">
+    <li>Sonntag 1 Rezept × 4 Portionen kochen (45–60 Min).</li>
+    <li>3 Boxen in den Kühlschrank (Mo–Mi), die 4. einfrieren.</li>
+    <li>Mittwochabend die Donnerstags-Box in den Kühlschrank legen.</li>
+    <li>Jede Woche ein anderes Rezept.</li>
+  </ol>
+  <div id="recipes" style="display:grid;gap:10px"></div>
+  <p class="foot" style="margin:0">Nährwerte pro Portion sind Schätzungen (±10 %).</p>
+</section>
+
+<!-- EINKAUF -->
+<section id="s-einkauf" hidden>
+  <p class="foot" style="margin:6px 0 0">Basis pro Woche für dich (Lidl, Kaufland, Famila). Abhaken wird auf diesem Gerät gemerkt.</p>
+  <div id="shop" style="display:grid;gap:10px"></div>
+  <button class="btn" id="reset">Liste zurücksetzen</button>
+</section>
+
+<!-- SNACKS / FLEX -->
+<section id="s-flex" hidden>
+  <h2>Snacks</h2>
+  <div class="grid2" id="snacks"></div>
+  <h2>In 15 Minuten</h2>
+  <div class="grid2" id="quick"></div>
+  <h2>Frosta-Upgrade</h2>
+  <div class="mini"><b>Ganzer Beutel + 150 g Hähnchen mitbraten</b><span>oder danach 250 g Skyr. Ein halber Beutel hat oft nur 15–20 g Eiweiß. Asia-Varianten auf Nüsse prüfen.</span></div>
+  <h2>Bestellen &amp; Feiern</h2>
+  <div class="grid2" id="out"></div>
+  <div class="mini"><b>1–2 freie Mahlzeiten pro Woche sind eingeplant.</b><span>Danach nichts „wieder gutmachen“, kein Hungern. Einfach normal weiter.</span></div>
+</section>
+
+<!-- REGELN -->
+<section id="s-regeln" hidden>
+  <div class="warnbox">
+    <h3>Nüsse: komplett weglassen</h3>
+    <p>Etikett checken: <b>Schalenfrüchte, Mandeln, Haselnüsse, Walnüsse, Cashew, Pistazien, Erdnüsse</b>.</p>
+    <p>Versteckt in: Pesto, Nuss-Nougat-Creme, Müsli/Granola, Riegel, Proteinpulver, Kuchen, Schokolade, Asia-Soßen (Erdnuss/Satay).</p>
+    <p>„Kann Spuren enthalten“: bis zur Abklärung beim Allergologen meiden.</p>
+    <p><b>Atemnot, Schwellung im Mund/Hals nach dem Essen → sofort 112.</b></p>
+  </div>
+
+  <h2>Messen</h2>
+  <div class="grid2">
+    <div class="mini"><b>Gewicht · mind. 3× pro Woche</b><span>Morgens nach dem Klo, vor Essen und Trinken. Es zählt nur der Wochenschnitt.</span></div>
+    <div class="mini"><b>Bauchumfang · sonntags</b><span>Höhe Bauchnabel, entspannt ausgeatmet. 2× messen, Mittelwert.</span></div>
+  </div>
+  <p class="foot" style="margin:0">Woche 1–2: +0,5–1,5 kg sind normal (Wasser durch Training und Kreatin), kein Fett.</p>
+
+  <h2>Anpassen ab Woche 3–4</h2>
+  <div style="display:grid;gap:8px">
+    <div class="rule"><i style="background:var(--good)"></i><div><b>Gewicht stabil, Bauch gleich oder kleiner, Leistung steigt</b><span>Läuft. Nichts ändern.</span></div></div>
+    <div class="rule"><i style="background:var(--mid)"></i><div><b>Gewicht fällt &gt; 0,5 kg/Woche, Leistung stockt</b><span>+200–300 kcal: extra Snack oder größere Kohlenhydrat-Portion.</span></div></div>
+    <div class="rule"><i style="background:var(--warn)"></i><div><b>Gewicht steigt &gt; 0,3 kg/Woche und Bauch wächst</b><span>−200 kcal: Saft, Abendsnack oder eine Bestellung weniger.</span></div></div>
+    <div class="rule"><i style="background:var(--muted)"></i><div><b>Gewicht stabil, Leistung stockt 4+ Wochen</b><span>Schlaf und Eiweiß prüfen, dann evtl. kleiner Überschuss.</span></div></div>
+  </div>
+  <p class="foot" style="margin:0">Entscheidungen treffen wir zusammen im Wochen-Check-in, nie wegen eines einzelnen Tages.</p>
+
+  <h2>Supplemente</h2>
+  <div style="display:grid;gap:8px">
+    <div class="sup"><b>Kreatin-Monohydrat</b><i class="st yes">Ja</i><span>3–5 g täglich ab 19.10., Zeitpunkt egal. Etikett auf Nuss-Spuren prüfen.</span></div>
+    <div class="sup"><b>Vitamin D3</b><i class="st yes">Okt–März</i><span>Max. 20 µg (800 IE) pro Tag ohne Blutwert. Dosis auf der Packung prüfen.</span></div>
+    <div class="sup"><b>Magnesium (abends)</b><i class="st opt">Optional</i><span>200–250 mg Citrat oder Bisglycinat, als Ersatz für Ashwagandha.</span></div>
+    <div class="sup"><b>Isoclear / Shake</b><i class="st opt">Backup</i><span>Nur wenn eine Eiweiß-Portion fehlt. Etikett auf Nuss-Spuren prüfen.</span></div>
+    <div class="sup"><b>Vulkanstark (MSM)</b><i class="st opt">Nicht nötig</i><span>Kaum Belege für Gelenke, wohl harmlos. Deine Entscheidung.</span></div>
+    <div class="sup"><b>Ashwa+ (Ashwagandha)</b><i class="st no">Eher nicht</i><span>BfR sieht mögliche Leber- und Schilddrüsenrisiken. Wenn weiter: mit Hausarzt absprechen. Gelbliche Haut, dunkler Urin → absetzen, Arzt.</span></div>
+  </div>
+</section>
+<p class="foot">Ausführliche Begründungen stehen im Dokument „Ernährungsplan Phase 1“.</p>
+</div>
+
+</div>
+<div id="mod-log" hidden>
+
+<div class="wrap">
+
+<nav role="tablist" id="ltabs">
+  <button role="tab" id="tab-training" aria-selected="true" data-tab="training">Training</button>
+  <button role="tab" id="tab-morgen" aria-selected="false" data-tab="morgen">Morgen</button>
+  <button role="tab" id="tab-woche" aria-selected="false" data-tab="woche">Woche</button>
+  <button role="tab" id="tab-verlauf" aria-selected="false" data-tab="verlauf">Verlauf</button>
+</nav>
+<div id="dbBanner" class="banner" hidden style="margin-top:12px">Speichern ist in dieser Ansicht gerade nicht verfügbar. Bitte die App neu öffnen.</div>
+
+<div id="calSheet" hidden role="dialog" aria-modal="true" aria-labelledby="calTitle">
+  <div class="sheet">
+    <div class="top"><b id="calTitle">Frühere Einheiten</b><button type="button" class="ib" id="calClose" aria-label="Schließen">✕</button></div>
+    <div class="top"><button type="button" class="ib" id="calPrev" aria-label="Vorheriger Monat">‹</button><b id="calMonth"></b><button type="button" class="ib" id="calNext" aria-label="Nächster Monat">›</button></div>
+    <div class="grid" id="calGrid"></div>
+    <div class="day" id="calDay"></div>
+  </div>
+</div>
+<!-- TRAINING -->
+<section id="p-training">
+  <button type="button" class="calbtn" id="calOpen" aria-label="Kalender: frühere Einheiten ansehen" title="Frühere Einheiten"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
+  <div class="row t-date-field">
+    <div class="field"><label for="t-date">Datum</label><input type="date" id="t-date"></div>
+  </div>
+  <div class="field"><span class="lbl">Einheit</span>
+    <div class="seg" id="t-unit"></div>
+  </div>
+  <div id="t-ex" style="display:grid;gap:12px"></div>
+  <div id="t-run" hidden class="row">
+    <div class="field"><label for="r-min">Dauer (Min)</label><input id="r-min" inputmode="decimal" placeholder="z. B. 25"></div>
+    <div class="field"><label for="r-km">Strecke (km, optional)</label><input id="r-km" inputmode="decimal" placeholder="z. B. 3,8"></div>
+  </div>
+  <div class="field" id="t-rpe-wrap" hidden><label for="r-rpe">Anstrengung (1–10, optional)</label>
+    <input id="r-rpe" inputmode="numeric" placeholder="z. B. 4">
+    <span class="note">1 = Spaziergang, 10 = Vollgas. Ein lockerer Lauf liegt bei 3–4: du kannst dabei noch ganze Sätze sprechen.</span></div>
+  <div class="field" id="t-rir-wrap"><label for="t-rir">Ø Reserve am Satzende (RIR 0–5)</label>
+    <input id="t-rir" inputmode="decimal" placeholder="z. B. 3">
+    <span class="note">Wie viele saubere Wiederholungen wären im Schnitt noch gegangen?</span></div>
+  <div class="field"><label for="t-note">Notiz: Technik, Beschwerden, Gefühl</label><textarea id="t-note" placeholder="z. B. Dips: leichtes Ziehen rechte Schulter"></textarea></div>
+  <button class="primary" id="t-save">Einheit speichern</button>
+  <p class="note">Leere Felder bleiben leer und zählen nicht als 0. Gewicht-Übungen: kg eintragen. Körpergewicht-Übungen: nur Wiederholungen plus die Variante, mit der du trainiert hast.</p>
+</section>
+
+<!-- MORGEN -->
+<section id="p-morgen" hidden>
+  <p class="note">Morgens nach dem Toilettengang, vor Essen und Trinken. Dauert 30 Sekunden.</p>
+  <div class="row">
+    <div class="field"><label for="m-date">Datum</label><input type="date" id="m-date"></div>
+    <div class="field"><label for="m-weight">Gewicht (kg)</label><input id="m-weight" inputmode="decimal" placeholder="z. B. 79,2"></div>
+    <div class="field"><label for="m-sleep">Schlaf (Std.)</label><input id="m-sleep" inputmode="decimal" placeholder="z. B. 6,5"></div>
+  </div>
+  <div class="field"><span class="lbl">Schlafqualität</span>
+    <div class="chips" data-field="sleepQ" id="m-sleepq"></div>
+    <div class="scale"><span>1 = sehr schlecht</span><span>5 = sehr gut</span></div>
+  </div>
+  <button class="primary" id="m-save">Morgenwerte speichern</button>
+  <div class="tbl"><table><thead><tr><th>Datum</th><th>Gewicht</th><th>Schlaf</th><th>Qualität</th></tr></thead><tbody id="m-list"></tbody></table></div>
+</section>
+
+<!-- WOCHE -->
+<section id="p-woche" hidden>
+  <div class="weeknav"><button id="w-prev" aria-label="Vorherige Woche">‹</button><b id="w-label"></b><button id="w-next" aria-label="Nächste Woche">›</button></div>
+  <div class="stats">
+    <div class="stat"><b id="w-sessions">–</b><span>Einheiten erledigt</span></div>
+    <div class="stat"><b id="w-avg">–</b><span>Ø Gewicht (kg)</span></div>
+    <div class="stat"><b id="w-sleep">–</b><span>Ø Schlaf (Std.)</span></div>
+  </div>
+  <div class="row">
+    <div class="field"><label for="w-waist">Bauchumfang (cm)</label><input id="w-waist" inputmode="decimal" placeholder="Höhe Bauchnabel, ausgeatmet"></div>
+  </div>
+  <div id="w-scales" style="display:grid;gap:14px"></div>
+  <div class="field"><label for="w-good">Was lief gut, was war schwierig?</label><textarea id="w-good"></textarea></div>
+  <div class="field"><label for="w-next-txt">Besonderheiten nächste Woche</label><textarea id="w-next-txt" placeholder="Termine, Stress, Urlaub …"></textarea></div>
+  <div class="field"><label for="w-changes">Hat sich etwas geändert? (Gesundheit, Alltag, Ausstattung, Ziele)</label><textarea id="w-changes" placeholder="leer lassen, wenn nicht"></textarea></div>
+  <button class="primary" id="w-save">Wochen-Check speichern</button>
+  <p class="note">Danach im Chat „Wochen-Check-in“ schreiben – ich lese die Werte von hier.</p>
+</section>
+
+<!-- VERLAUF -->
+<section id="p-verlauf" hidden>
+  <h2>Gewicht · Wochenschnitt</h2>
+  <div id="v-chart"></div>
+  <div class="tbl"><table><thead><tr><th>Woche</th><th>Ø kg</th><th>Bauch cm</th><th>Einheiten</th><th>Energie</th><th>Stress</th></tr></thead><tbody id="v-weeks"></tbody></table></div>
+  <h2>Letzte Einheiten</h2>
+  <div id="v-sessions"></div>
+</section>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+</div>
+<script>
+function __show(m){document.querySelectorAll("#mainnav button").forEach(b=>b.setAttribute("aria-selected",String(b.dataset.m===m)));["plan","food","log"].forEach(x=>document.getElementById("mod-"+x).hidden=x!==m);window.scrollTo(0,0);}
+document.getElementById("mainnav").addEventListener("click",e=>{const b=e.target.closest("button[data-m]");if(b)__show(b.dataset.m);});
+window.__goLog=k=>{__show("log");window.__logUnit&&window.__logUnit(k);};
+</script>
+<script>{
+
+const START = "2026-10-19";
+const play = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>`;
+const vids = (v,short) => `<div class="vids">`+v.map(([u,l,lang])=>`<a class="vid" href="${u}" target="_blank" rel="noopener">${play}${short?"Video":l}${lang==="EN"?` <span class="lang">EN</span>`:""}</a>`).join("")+`</div>`;
+const UNITS = {
+  A:{tab:"A",day:"Mo",title:"Oberkörper",where:"zuhause",min:"45 Min",ex:[
+    {n:"Klimmzug-Stufe",reps:"3–6",rest:"2–3 Min",cues:["Schultern runter, Brust zur Stange","Langsam ablassen, kein Schwung"],alt:"Stufen: Hängen → Negative (4–5 s ablassen) → mit Fußhilfe → ganzer Klimmzug",v:[["https://www.youtube.com/shorts/xCMQyVg-hFk", "Negative Klimmzüge", "DE"]]},
+    {n:"Liegestütz-Stufe",reps:"6–12",rest:"2 Min",cues:["Körper gerade wie ein Brett","Ellenbogen ca. 45° vom Körper"],alt:"Stufen: Hände erhöht → Boden → 2 s Pause unten → Füße erhöht",v:[["https://www.youtube.com/shorts/2n-hlrOAYAs", "Liegestütze", "DE"]]},
+    {n:"Schlingen-Rudern",reps:"8–12",rest:"90 s",cues:["Körper gerade, Brust zu den Händen ziehen","Flacher stehen = schwerer"],alt:"Ohne Schlingentrainer: unter einem stabilen Tisch rudern",v:[["https://www.youtube.com/shorts/HUjvxRILT-g", "Rudern mit TRX", "DE"]]},
+    {n:"Pike-Liegestütze",reps:"6–10",rest:"90 s",cues:["Po hoch, Körper wie ein umgedrehtes V","Kopf zwischen die Hände senken"],alt:"Schwerer: Füße auf einen Stuhl",v:[["https://www.youtube.com/shorts/0UcR2hx4x_s", "Pike Push-ups", "DE"]]},
+    {n:"Schlingen-Bizepscurl",reps:"10–15",rest:"Superset",pair:"5a",cues:["Ellenbogen bleiben auf Höhe","Nur die Arme beugen"],alt:"Alternative: Klimmzüge im Untergriff",v:[["https://www.youtube.com/shorts/jVJOsA19Ugs", "TRX Bizepscurl", "EN"]]},
+    {n:"Schlingen-Trizepsstrecken",reps:"10–15",rest:"60 s danach",pair:"5b",cues:["Hände zur Stirn, dann Arme strecken","Körper bleibt gerade"],alt:"Alternative: enge Liegestütze",v:[["https://www.youtube.com/shorts/ZwuG20LhsNA", "TRX Trizeps", "EN"]]},
+    {n:"Hängendes Knieheben",reps:"8–12",rest:"60 s",cues:["Knie zur Brust, Becken einrollen","Ruhig hängen, nicht schwingen"],alt:"Später: Beine gestreckt",v:[["https://www.youtube.com/shorts/tkkT4igqAjg", "Hängendes Knieheben", "EN"]]}
+  ]},
+  B:{tab:"B",day:"Fr",title:"Beine + Brust",where:"Gym",min:"50 Min",ex:[
+    {n:"Goblet Squat",reps:"8–12",rest:"2 Min",cues:["Hantel senkrecht an der Brust","Fersen am Boden, Rücken gerade"],alt:"Alternative: Beinpresse",v:[["https://www.youtube.com/shorts/FQTcl4MTHIY", "Goblet Squat", "EN"]]},
+    {n:"Rumänisches Kreuzheben (KH)",reps:"8–12",rest:"2 Min",cues:["Po nach hinten, Knie leicht gebeugt","Hanteln nah am Bein, Rücken gerade"],alt:"Alternative: Beinbeuger-Maschine",v:[["https://www.youtube.com/shorts/gYeiHW4Rnug", "Rumänisches Kreuzheben", "DE"]]},
+    {n:"Dips",reps:"6–10",rest:"2 Min",cues:["Oberkörper leicht nach vorn","Runter bis Oberarm etwa waagerecht"],alt:"Leichter: Dip-Maschine mit Unterstützung · Schulter zwickt: Brustpresse",v:[["https://www.youtube.com/shorts/8dktwJxbiRk", "Dips lernen", "DE"], ["https://www.youtube.com/shorts/EtXccn7V_kc", "Dips am Gerät", "DE"]]},
+    {n:"Bulgarian Split Squat",reps:"8–12 je Bein",rest:"90 s",base:2,cues:["Hinterer Fuß auf der Bank","Gerade nach unten sinken"],alt:"Alternative: Ausfallschritte gehend",v:[["https://www.youtube.com/shorts/or1frhkjBDc", "Bulgarian Split Squat", "EN"]]},
+    {n:"Wadenheben sitzend (Maschine)",reps:"10–15",rest:"Superset",pair:"5a",cues:["Fußballen auf die Kante, Knie unter das Polster","Ganz runter in die Dehnung, 1 s halten, ganz hoch"],alt:"Maschine belegt: Wadenheben stehend an einer Stufe",v:[["https://www.youtube.com/shorts/0yy_6LyjoWI", "Wadenheben sitzend", "EN"]]},
+    {n:"Kabel-Crunch",reps:"10–15",rest:"60 s danach",pair:"5b",cues:["Rippen Richtung Becken einrollen","Nicht aus der Hüfte ziehen"],alt:"Alternative: Unterarmstütz 20–40 s",v:[["https://www.youtube.com/shorts/bd63yN6g_9w", "Kabel-Crunch", "EN"]]}
+  ]},
+  C:{tab:"C",day:"Sa",title:"Oberkörper + Arme",where:"Gym",min:"55 Min",ex:[
+    {n:"Klimmzüge",reps:"5–10",rest:"2–3 Min",cues:["Stufe wie in Einheit A","Brust zur Stange"],alt:"Alternative: Klimmzug-Maschine mit Unterstützung oder Latzug",v:[["https://www.youtube.com/shorts/r83hNY4Zang", "Klimmzüge", "DE"], ["https://www.youtube.com/shorts/Nqy1rtyVH2o", "Klimmzug-Maschine", "EN"]]},
+    {n:"Schrägbankdrücken (KH)",reps:"8–12",rest:"2 Min",cues:["Bank ca. 30°, Schulterblätter zusammen","Unterarme senkrecht"],alt:"Alternative: Liegestütze mit Füßen erhöht",v:[["https://www.youtube.com/shorts/qTOthl-JUOc", "Schrägbankdrücken", "DE"]]},
+    {n:"Rudern",reps:"8–12",rest:"90 s",cues:["Brust zur Stange bzw. zum Griff","Ellenbogen nah am Körper"],alt:"Australian Rows an der Multipresse oder Kabelrudern sitzend",v:[["https://www.youtube.com/shorts/drFCrI0yy8k", "Australian Rows", "EN"], ["https://www.youtube.com/shorts/ZYG1ECFVPJI", "Kabelrudern", "EN"]]},
+    {n:"Seitheben (KH)",reps:"12–20",rest:"60 s",cues:["Leichtes Gewicht, kein Schwung","Nur bis Schulterhöhe"],alt:"Wichtigste Übung für breitere Schultern",v:[["https://www.youtube.com/shorts/AAAu1UtPRa8", "Seitheben", "DE"]]},
+    {n:"Kurzhantel-Curls",reps:"10–15",rest:"Superset",pair:"5a",cues:["Ellenbogen fest an der Seite","2–3 s ablassen"],alt:"Wöchentlich wechseln: Hammergriff / Untergriff",v:[["https://www.youtube.com/shorts/d34GebmKlHM", "Curls", "EN"], ["https://www.youtube.com/shorts/68jJTFfJpuU", "Hammercurls", "DE"]]},
+    {n:"Trizepsdrücken (Kabel)",reps:"10–15",rest:"60 s danach",pair:"5b",cues:["Ellenbogen fest an der Seite","Unten Seil leicht auseinander"],alt:"",v:[["https://www.youtube.com/shorts/IiHJXHK-jp0", "Trizepsdrücken", "DE"]]},
+    {n:"Face Pulls",reps:"12–20",rest:"Superset",pair:"6a",base:2,cues:["Seil zum Gesicht ziehen","Ellenbogen hoch und nach außen"],alt:"Gut für Haltung nach viel Sitzen",v:[["https://www.youtube.com/shorts/opWSE43oPSI", "Face Pulls", "DE"]]},
+    {n:"Hängendes Knie-/Beinheben",reps:"8–12",rest:"60 s danach",pair:"6b",base:2,cues:["Becken einrollen","Nicht schwingen"],alt:"",v:[["https://www.youtube.com/shorts/tkkT4igqAjg", "Hängendes Beinheben", "EN"]]}
+  ]},
+  L:{tab:"Lauf",day:"Mi",title:"Lockerer Lauf",where:"draußen",min:"20–35 Min",run:true},
+  S:{tab:"Stress",day:"bei Bedarf",title:"Stress-Version",where:"zuhause",min:"20 Min",stress:true,ex:[
+    {n:"Liegestütze (deine Stufe)",reps:"8–10",rest:"",cues:[],alt:"",v:[["https://www.youtube.com/shorts/2n-hlrOAYAs", "Liegestütze", "DE"]]},
+    {n:"Klimmzug-Stufe",reps:"3–5",rest:"",cues:[],alt:"",v:[["https://www.youtube.com/shorts/xCMQyVg-hFk", "Negative Klimmzüge", "DE"]]},
+    {n:"Schlingen-Rudern",reps:"10",rest:"",cues:[],alt:"",v:[["https://www.youtube.com/shorts/HUjvxRILT-g", "Rudern mit TRX", "DE"]]},
+    {n:"Kniebeugen ohne Gewicht",reps:"15",rest:"",cues:[],alt:"",v:[["https://www.youtube.com/shorts/Xhn65eHt0yY", "Kniebeugen", "DE"]]},
+    {n:"Hängendes Knieheben",reps:"8",rest:"",cues:[],alt:"",v:[["https://www.youtube.com/shorts/tkkT4igqAjg", "Hängendes Knieheben", "EN"]]}
+  ]}
+};
+const PHASES = [
+  {w:1,label:"Einstieg + Einstiegstest",rir:"3–4",sets:b=>"2"},
+  {w:2,label:"Gewöhnung",rir:"3",sets:b=>b>2?"2–3":"2"},
+  {w:3,label:"Konzertwoche: A Mo, B Do, C entfällt",rir:"2–3",sets:b=>b>2?"2–3":"2"},
+  {w:4,label:"Aufbau",rir:"1–2",sets:b=>String(b)},
+  {w:5,label:"Aufbau",rir:"1–2",sets:b=>String(b)},
+  {w:6,label:"Aufbau",rir:"1–2",sets:b=>String(b)},
+  {w:7,label:"Aufbau",rir:"1–2",sets:b=>String(b)},
+  {w:8,label:"Leichtere Woche (Deload)",rir:"3–4",sets:b=>"2"}
+];
+const RUN = {1:20,2:25,3:25,4:30,5:30,6:35,7:35,8:25};
+const pad=n=>String(n).padStart(2,"0");
+function todayStr(){const d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());}
+function weekNo(){ const days=Math.floor((new Date(todayStr()+"T12:00:00")-new Date(START+"T12:00:00"))/86400000); return days<0?0:Math.floor(days/7)+1; }
+const wk = weekNo(); const ph = PHASES[Math.min(Math.max(wk,1),8)-1];
+document.getElementById("pweek").innerHTML = wk===0
+  ? `<b>Start Mo 19.10.</b><span>Woche 1: ${ph.label} · 2 Arbeitssätze · RIR ${ph.rir}</span>`
+  : wk>8 ? `<b>Woche ${wk}</b><span>Phase 1 ist durch – Plan für Phase 2 kommt im Monatsbericht.</span>`
+  : `<b>Woche ${wk}</b><span>${ph.label} · RIR ${ph.rir}</span>`;
+
+const dayKey = ({1:"A",3:"L",5:"B",6:"C"})[new Date().getDay()] || "A";
+let current = (()=>{ const h=location.hash.slice(1); return UNITS[h]?h:dayKey; })();
+function renderTabs(){
+  document.getElementById("ptabs").innerHTML = Object.entries(UNITS).map(([k,u])=>`<button role="tab" aria-selected="${k===current}" data-k="${k}">${u.tab}<small>${u.day}</small></button>`).join("");
+}
+document.getElementById("ptabs").addEventListener("click",e=>{const b=e.target.closest("button[data-k]");if(!b)return;current=b.dataset.k;renderTabs();renderUnit();});
+function renderUnit(){
+  const u=UNITS[current]; let h=`<div class="unit-head"><h2>${u.title}</h2><span class="meta">${u.day} · ${u.where} · ${u.min}</span></div><button class="golog" data-golog="${current}">Diese Einheit eintragen →</button>`;
+  if(u.run){
+    const m = RUN[Math.min(Math.max(wk,1),8)];
+    h+=`<div class="ex" style="margin-top:12px"><div class="top"><h3>Lauf im Sprechtempo</h3><div class="dose">${m} Min<small>diese Woche</small></div></div>
+      <ul class="cues"><li>Du kannst dabei ganze Sätze sprechen. Sonst langsamer oder kurz gehen.</li><li>Höchstens 5 Min mehr pro Woche.</li><li>Tennis/Padel zählt als Lauf.</li></ul>
+      <div class="run"><span>Woche 1</span><b>20 Min</b><span>Woche 2–3</span><b>25 Min</b><span>Woche 4–5</span><b>30 Min</b><span>Woche 6–7</span><b>35 Min</b><span>Woche 8</span><b>25 Min</b></div></div>`;
+  } else if(u.stress){
+    h+=`<p class="alt" style="margin-top:8px">Für Tage mit wenig Schlaf oder viel Stress. 2 Runden am Stück, 60 s Pause nach jeder Runde, RIR 3.</p><div class="list">`+
+      u.ex.map((x,i)=>`<div class="ex"><div class="top"><h3><span class="no">${i+1}</span>${x.n}</h3><div class="dose">${x.reps}</div></div>${vids(x.v,true)}</div>`).join("")+`</div>`;
+  } else {
+    h+=`<div class="list">`+u.ex.map((x,i)=>{
+      const no = x.pair || String(i+1 - u.ex.slice(0,i).filter(y=>y.pair&&y.pair.endsWith("b")).length);
+      const sets = (wk===0?PHASES[0]:ph).sets(x.base||3);
+      return `<div class="ex${x.pair?" pair":""}">
+        ${x.pair&&x.pair.endsWith("a")?`<span class="tag">Superset mit nächster Übung</span>`:""}
+        <div class="top"><h3><span class="no">${no}</span>${x.n}</h3><div class="dose">${sets} × ${x.reps}<small>${x.rest==="Superset"?"direkt weiter":"Pause "+x.rest}</small></div></div>
+        ${x.cues.length?`<ul class="cues">${x.cues.map(c=>`<li>${c}</li>`).join("")}</ul>`:""}
+        ${x.alt?`<div class="alt">${x.alt}</div>`:""}
+        ${vids(x.v)}
+      </div>`; }).join("")+`</div>`;
+  }
+  document.getElementById("punit").innerHTML=h;
+}
+renderTabs(); renderUnit();
+
+document.getElementById("punit").addEventListener("click",e=>{const b=e.target.closest("[data-golog]");if(!b)return;window.__goLog(b.dataset.golog);});
+window.__setPlanUnit=k=>{if(UNITS[k]){current=k;renderTabs();renderUnit();}};
+
+}</script>
+<script>{
+
+const DAYS = {
+  work:[
+    {t:"06:15",h:"Supplemente",d:"Kreatin 3–5 g + Vitamin D mit Wasser",p:0,note:"Flasche für die Arbeit füllen"},
+    {t:"09:00",h:"Frühstück",d:"2–3 Scheiben Vollkornbrot mit Putenbrust, Kochschinken oder Käse light, Gurke, Tomate · dazu 250 g Skyr mit Obst",p:40},
+    {t:"12:30",h:"Mittag · Meal-Prep-Box",d:"Rezept der Woche aus dem Kühlschrank, aufwärmen",p:45,hl:true,note:"Neu – das fehlte bisher"},
+    {t:"15:45",h:"Snack",d:"200 g Magerquark oder Skyr + Banane oder Apfel",p:25},
+    {t:"19:00",h:"Abendessen",d:"Warm nach dem Teller-Prinzip: selbst gekocht, mit deiner Mutter oder Frosta-Upgrade",p:40},
+    {t:"21:00",h:"Optional",d:"250 g Magerquark mit Beeren oder 2 Brote mit Aufschnitt",p:30,opt:true}
+  ],
+  train:[
+    {t:"06:15",h:"Supplemente",d:"Kreatin 3–5 g + Vitamin D",p:0},
+    {t:"09:00",h:"Frühstück",d:"Wie am Werktag: Brot mit Aufschnitt + 250 g Skyr mit Obst",p:40},
+    {t:"12:30",h:"Mittag · Meal-Prep-Box",d:"Rezept der Woche",p:45,hl:true},
+    {t:"15:45",h:"Snack vor dem Training",d:"200 g Skyr + Banane. Fr: Banane oder Brot direkt vor dem Gym",p:25,hl:true,note:"Mo/Mi 18:15 · Fr 16:15"},
+    {t:"19:15",h:"Abendessen nach dem Training",d:"Teller mit der größeren Kohlenhydrat-Portion (2 Fäuste Reis, Nudeln oder Kartoffeln)",p:40},
+    {t:"21:00",h:"Optional",d:"250 g Magerquark mit Beeren",p:30,opt:true}
+  ],
+  weekend:[
+    {t:"10:00",h:"Frühstück",d:"3–4 Rühreier mit Brot, Kochschinken, Tomaten · oder Skyr-Bowl mit Haferflocken und Obst",p:40,note:"Sa: mind. 1,5 Std. vor Training C (12 Uhr)"},
+    {t:"13:30",h:"Mittag",d:"Warm nach dem Teller-Prinzip. Sa direkt nach dem Training",p:40},
+    {t:"16:00",h:"Snack",d:"Skyr oder Hüttenkäse mit Obst",p:25},
+    {t:"19:30",h:"Abendessen",d:"Kochen oder bestellen (siehe Snacks → Bestellen). So: Meal Prep für die Woche",p:40},
+    {t:"",h:"Supplemente",d:"Kreatin + Vitamin D irgendwann am Tag",p:0}
+  ]
+};
+const RECIPES = [
+  {n:"Protein-Bolognese",kcal:690,p:46,min:40,ing:["500 g Rinderhack (5–10 % Fett)","400 g Vollkornspaghetti","1 Zwiebel, 2 Karotten, 1 Paprika","700 g passierte Tomaten, 2 EL Tomatenmark","1 EL Olivenöl, Oregano, Salz, Pfeffer","optional 40 g Parmesan"],st:["Gemüse klein würfeln, in Öl anbraten.","Hack dazu, krümelig braten, Tomatenmark kurz mitrösten.","Tomaten dazu, 20 Min köcheln lassen.","Nudeln kochen, alles auf 4 Boxen verteilen."]},
+  {n:"Hähnchen-Reis-Pfanne",kcal:560,p:44,min:30,ing:["600 g Hähnchenbrust","300 g Reis","600 g TK-Gemüse (Brokkoli/Paprika)","2 EL Öl, 4 EL Sojasauce","Knoblauch, Paprikapulver"],st:["Reis kochen.","Hähnchen würfeln und scharf anbraten.","Gemüse dazu, mit Sojasauce und Gewürzen ablöschen.","Fertige Asia-Soßen nur nach Etikett-Check (Nüsse)."]},
+  {n:"Chili con Carne",kcal:580,p:39,min:45,ing:["500 g Rinderhack","1 Dose Kidneybohnen, 1 kleine Dose Mais","1 Zwiebel, 1 Paprika","400 g gehackte Tomaten, 1 EL Tomatenmark","Chili, Kreuzkümmel, Paprika edelsüß","250 g Reis"],st:["Zwiebel und Paprika anbraten, Hack dazu.","Tomaten, Bohnen, Mais und Gewürze dazu.","25 Min köcheln lassen, Reis kochen.","Auf 4 Boxen verteilen."]},
+  {n:"Hähnchen-Nudelauflauf",kcal:610,p:50,min:45,ing:["350 g Penne","400 g Hähnchenbrust (oder Kochschinken)","500 g TK-Brokkoli","200 g Frischkäse light + 250 ml Milch 1,5 %","125 g Mozzarella light","Salz, Pfeffer, Muskat"],st:["Nudeln 2 Min kürzer kochen, Hähnchen anbraten.","Frischkäse mit Milch verrühren, würzen.","Alles in eine Form, Mozzarella drüber.","20 Min bei 200 °C backen, aufteilen."]}
+];
+const SHOP = [
+  ["Eiweiß",["2–3 kg Skyr / Magerquark / griech. Joghurt (fettarm)","10 Eier","Putenbrust- & Kochschinken-Aufschnitt","1 Hüttenkäse","Fleisch fürs Meal-Prep-Rezept"]],
+  ["Kohlenhydrate",["Vollkornbrot","Reis","Nudeln","Kartoffeln","Wraps","Haferflocken (Etikett prüfen)"]],
+  ["Gemüse & Obst",["1–2 Beutel TK-Gemüse","Gurke, Tomaten, Paprika","Zwiebeln, Karotten, Salat","Bananen, Äpfel","TK-Beeren"]],
+  ["Vorrat",["Passierte & gehackte Tomaten","Kidneybohnen, Mais","Tomatenmark, Sojasauce","Olivenöl, Gewürze"]],
+  ["Extras",["Käse light, Mozzarella light","Frischkäse light","Frosta für Notfälle"]]
+];
+const SNACKS = [["Skyr / Magerquark + Obst","ca. 25 g Eiweiß"],["Hüttenkäse","ca. 25 g pro Becher"],["Reiswaffeln mit Putenbrust","ca. 10–15 g"],["2 gekochte Eier","ca. 13 g"],["Banane oder Apfel","Energie vorm Training"],["Shake (Backup)","ca. 25 g"]];
+const QUICK = [["Wrap mit Hähnchenstreifen","Salat, Tomate, Joghurt-Soße"],["4 Rühreier + Kochschinken","dazu 2 Scheiben Brot"],["Mikrowellen-Kartoffeln","Kräuterquark + Spiegelei"],["Nudeln mit Tomatensoße","+ 200 g Hack oder Hähnchen"]];
+const OUT = [["Döner","Gute Wahl, ca. 40 g Eiweiß. Viel Salat."],["Pizza","Mit Fleisch + Salat. Kein Pesto."],["Restaurant","Steak oder Grillgericht mit Beilage."],["Alkohol","3–4× im Jahr: kein Thema."]];
+
+const $=id=>document.getElementById(id);
+document.getElementById("ftabs").addEventListener("click",e=>{const b=e.target.closest("button[data-t]");if(!b)return;
+  document.querySelectorAll("#ftabs button").forEach(x=>x.setAttribute("aria-selected",String(x===b)));
+  ["zaehl","tag","rezepte","einkauf","flex","regeln"].forEach(t=>$("s-"+t).hidden=t!==b.dataset.t);});
+
+let day = ({0:"weekend",6:"weekend",1:"train",3:"train",5:"train"})[new Date().getDay()]||"work";
+function renderDay(){
+  document.querySelectorAll("#dayseg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.d===day)));
+  const items=DAYS[day];
+  $("timeline").innerHTML=items.map(m=>`<div class="meal"><div class="time">${m.t}</div><div class="card${m.opt?" opt":""}${m.hl?" hl":""}"><div class="t"><h3>${m.h}</h3>${m.p?`<span class="p">${m.p} g Eiweiß</span>`:""}</div><p>${m.d}</p>${m.note?`<span class="note">${m.note}</span>`:""}</div></div>`).join("");
+  const base=items.filter(m=>!m.opt).reduce((a,m)=>a+m.p,0), opt=items.filter(m=>m.opt).reduce((a,m)=>a+m.p,0);
+  const pct=Math.min(100,Math.round(base/140*100));
+  $("pbar").innerHTML=`<div class="lbl"><span>Eiweiß ohne Optionales: ${base} g</span><span>Ziel 140 g</span></div><div class="track"><div class="fill" style="width:${pct}%"></div></div>${opt?`<div class="lbl"><span>mit optionalem Snack: ${base+opt} g</span><span></span></div>`:""}`;
+}
+$("dayseg").addEventListener("click",e=>{const b=e.target.closest("button[data-d]");if(!b)return;day=b.dataset.d;renderDay();});
+
+$("recipes").innerHTML=RECIPES.map(r=>`<details class="rc"><summary><div class="row"><h3>${r.n}</h3><span class="more">Rezept ▾</span></div><div class="chips"><span class="chip pr">${r.p} g Eiweiß</span><span class="chip">${r.kcal} kcal</span><span class="chip">${r.min} Min</span><span class="chip">4 Portionen</span></div></summary><div class="body"><ul>${r.ing.map(i=>`<li>${i}</li>`).join("")}</ul><ol class="steps">${r.st.map(s=>`<li>${s}</li>`).join("")}</ol></div></details>`).join("");
+
+let checked={}; try{checked=JSON.parse(localStorage.getItem("shop")||"{}")}catch(e){}
+function renderShop(){
+  $("shop").innerHTML=SHOP.map(([cat,items],ci)=>`<div class="shop"><h3>${cat}</h3>${items.map((it,ii)=>{const id=`sh-${ci}-${ii}`;return `<label for="${id}"><input type="checkbox" id="${id}" ${checked[id]?"checked":""}><span>${it}</span></label>`}).join("")}</div>`).join("");
+}
+$("shop").addEventListener("change",e=>{if(e.target.type!=="checkbox")return;checked[e.target.id]=e.target.checked;try{localStorage.setItem("shop",JSON.stringify(checked))}catch(_){}});
+$("reset").addEventListener("click",()=>{checked={};try{localStorage.removeItem("shop")}catch(_){}renderShop();});
+
+const mini=a=>a.map(([b,s])=>`<div class="mini"><b>${b}</b><span>${s}</span></div>`).join("");
+$("snacks").innerHTML=mini(SNACKS);$("quick").innerHTML=mini(QUICK);$("out").innerHTML=mini(OUT);
+renderDay();renderShop();
+
+/* ---- Zähler ---- */
+const ZT={kcal:{t:2700,l:"Kalorien",u:"kcal",col:"var(--accent)",mode:"approx"},p:{t:140,l:"Eiweiß",u:"g",col:"var(--prot)",mode:"min"},f:{t:75,lo:65,hi:85,l:"Fett",u:"g",col:"var(--fat)",mode:"range"},c:{t:320,l:"Kohlenhydrate",u:"g",col:"var(--carb)",mode:"approx"}};
+const QUICK_FOODS=[["Skyr 250 g",160,27,0.5,10],["Magerquark 250 g",170,30,0.5,10],["2 Brote mit Aufschnitt",300,18,8,38],["Bolognese-Box",690,46,18,80],["Hähnchen-Reis-Box",560,44,12,65],["Chili-Box",580,39,16,62],["Auflauf-Box",610,50,16,62],["2 Eier",155,13,11,1],["Banane",110,1,0.3,25],["Apfel",80,0.4,0.3,19],["Hüttenkäse 200 g",190,25,8,4],["Shake (Isoclear)",90,22,0,1],["Döner",700,40,28,65],["Pizza (ganz)",1000,40,35,120]];
+const zn=v=>{if(v==null)return null;const t=String(v).trim().replace(",",".");if(t==="")return null;const x=Number(t);return Number.isFinite(x)?x:null;};
+const zpad=n=>String(n).padStart(2,"0");
+const ztoday=()=>{const d=new Date();return d.getFullYear()+"-"+zpad(d.getMonth()+1)+"-"+zpad(d.getDate());};
+let zdb=null,zdate=ztoday(),zentries=[],zunsub=null,zchain=Promise.resolve(),zrecent=[];
+const zesc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function ztotals(){const t={kcal:0,p:0,f:0,c:0},miss={kcal:0,p:0,f:0,c:0};zentries.forEach(e=>Object.keys(t).forEach(k=>{if(e[k]==null)miss[k]++;else t[k]+=e[k];}));return {t,miss};}
+function zrender(){
+  const {t,miss}=ztotals();
+  $("z-sum").innerHTML=Object.entries(ZT).map(([k,z])=>{
+    const v=Math.round(t[k]);const pct=Math.min(100,Math.round(v/z.t*100));let left,cls="";
+    if(z.mode==="min"){left=v>=z.t?"Ziel erreicht ✓":"noch "+(z.t-v)+" "+z.u;if(v>=z.t)cls="done";}
+    else if(z.mode==="range"){left=v<z.lo?"noch "+(z.lo-v)+"–"+(z.hi-v)+" "+z.u:v<=z.hi?"im Bereich ✓":(v-z.hi)+" "+z.u+" drüber";cls=v<z.lo?"":v<=z.hi?"done":"over";}
+    else{const d=z.t-v;left=Math.abs(d)<=z.t*0.05?"passt ✓":d>0?"noch ca. "+d+" "+z.u:"ca. "+(-d)+" "+z.u+" drüber";cls=Math.abs(d)<=z.t*0.05?"done":d>0?"":"over";}
+    return `<div class="zm"><div class="top"><b>${z.l}</b><span class="v">${v} / ${z.mode==="range"?z.lo+"–"+z.hi:z.t} ${z.u}</span></div><div class="track"><div class="fill" style="width:${pct}%;background:${z.col}"></div></div><span class="left ${cls}">${left}${miss[k]?` · ${miss[k]} Eintrag ohne Wert`:""}</span></div>`;}).join("");
+  $("z-list").innerHTML=zentries.length?zentries.map((e,i)=>`<div class="zitem"><span class="n">${zesc(e.name||"Eintrag")}</span><span class="m">${e.kcal==null?"–":Math.round(e.kcal)} kcal · ${e.p==null?"–":Math.round(e.p*10)/10} g E</span><button type="button" data-zdel="${i}" aria-label="${zesc(e.name||"Eintrag")} löschen">×</button></div>`).join(""):`<p class="foot" style="margin:0">Noch nichts eingetragen. Tipp oben auf ein Lebensmittel oder trag einen eigenen Eintrag ein.</p>`;
+}
+function zsave(){
+  if(!zdb){zrender();return;}
+  const date=zdate,entries=zentries.slice(),{t}=ztotals();
+  zchain=zchain.then(()=>zdb.collection("food").doc(date).set({date,entries,totals:t,updatedAt:new Date().toISOString()})).catch(()=>{$("z-note").hidden=false;$("z-note").textContent="Speichern hat nicht geklappt – bitte nochmal versuchen.";});
+}
+function zadd(e){zentries.push({...e,at:new Date().toISOString()});zrender();zsave();if(e.code)zchain.then(zloadRecent);}
+async function zloadRecent(){
+  if(!zdb)return;
+  try{const qs=await zdb.collection("food").orderBy("date","desc").limit(14).get();const seen=new Set(QUICK_FOODS.map(q=>q[0]));zrecent=[];
+    const rows=[];qs.docs.forEach(d=>(d.data().entries||[]).forEach(e=>rows.push(e)));
+    rows.sort((a,b)=>String(b.at||"").localeCompare(String(a.at||"")));
+    rows.forEach(e=>{const key=e.code?"code:"+e.code:e.name;if(e.name&&!seen.has(key)&&zrecent.length<10){seen.add(key);zrecent.push(e);}});
+    $("z-recent-wrap").hidden=!zrecent.length;
+    $("z-recent").innerHTML=zrecent.map((r,i)=>r.code?`<button type="button" class="code" data-zr="${i}">${zesc(r.name.split(" · ")[0])}</button>`:`<button type="button" data-zr="${i}">${zesc(r.name)}<small>${r.p??"–"} g</small></button>`).join("");
+  }catch(_){}
+}
+window.__food={
+  add:e=>{zadd(e);return zchain;},
+  dateLabel:()=>{const t=ztoday();if(zdate===t)return "heute";const d=new Date(zdate+"T12:00:00");return "am "+d.toLocaleDateString("de-DE",{weekday:"short",day:"2-digit",month:"2-digit"});},
+  toast:m=>window.appToast&&window.appToast(m)
+};
+function zsub(){
+  if(zunsub){zunsub();zunsub=null;}
+  zentries=[];zrender();
+  if(!zdb)return;
+  zunsub=zdb.collection("food").doc(zdate).onSnapshot(snap=>{zentries=snap.exists?(snap.data().entries||[]).slice():[];zrender();},()=>{});
+}
+$("z-quick").innerHTML=QUICK_FOODS.map((q,i)=>`<button type="button" data-zq="${i}">${q[0]}<small>${q[2]} g</small></button>`).join("");
+$("z-quick").addEventListener("click",e=>{const b=e.target.closest("[data-zq]");if(!b)return;const q=QUICK_FOODS[+b.dataset.zq];zadd({name:q[0],kcal:q[1],p:q[2],f:q[3],c:q[4]});});
+$("z-recent").addEventListener("click",e=>{const b=e.target.closest("[data-zr]");if(!b)return;const r=zrecent[+b.dataset.zr];if(r.code&&window.Scanner){window.Scanner.openProduct(r.code);return;}zadd({name:r.name,kcal:r.kcal,p:r.p,f:r.f,c:r.c});});
+$("z-scan").addEventListener("click",()=>window.Scanner&&window.Scanner.open());
+$("z-list").addEventListener("click",e=>{const b=e.target.closest("[data-zdel]");if(!b)return;zentries.splice(+b.dataset.zdel,1);zrender();zsave();});
+$("z-form").addEventListener("submit",e=>{e.preventDefault();const name=$("z-name").value.trim();const v={kcal:zn($("z-kcal").value),p:zn($("z-p").value),f:zn($("z-f").value),c:zn($("z-c").value)};
+  if(!name&&v.kcal==null&&v.p==null)return;zadd({name:name||"Eintrag",...v});["z-name","z-kcal","z-p","z-f","z-c"].forEach(id=>$(id).value="");});
+$("z-date").value=zdate;
+$("z-date").addEventListener("change",()=>{zdate=$("z-date").value||ztoday();zsub();});
+zrender();
+(async()=>{
+  zdb=window.claude&&window.claude.use?await window.claude.use("db"):null;
+  if(!zdb){$("z-note").hidden=false;$("z-note").textContent="Speichern ist in dieser Ansicht nicht verfügbar – die Einträge gelten nur, solange die Seite offen ist.";return;}
+  zsub();
+  zloadRecent();
+})();
+
+
+}</script>
+<script>{
+
+const UNITS = {
+  A:{label:"A",name:"Oberkörper (zuhause)",ex:["Klimmzug-Stufe","Liegestütz-Stufe","Schlingen-Rudern","Pike-Liegestütze","Schlingen-Bizepscurl","Schlingen-Trizepsstrecken","Hängendes Knieheben"]},
+  B:{label:"B",name:"Beine + Brust/Core (Gym)",ex:["Goblet Squat","Rumänisches Kreuzheben (KH)","Dips","Bulgarian Split Squat","Wadenheben sitzend (Maschine)","Kabel-Crunch"]},
+  C:{label:"C",name:"Oberkörper + Arme (Gym)",ex:["Klimmzüge","Schrägbankdrücken (KH)","Rudern","Seitheben (KH)","Kurzhantel-Curls","Trizepsdrücken (Kabel)","Face Pulls","Hängendes Knie-/Beinheben"]},
+  L:{label:"Lauf",name:"Lockerer Lauf",run:true,ex:[]},
+  S:{label:"Stress",name:"Stress-Version (20 Min)",ex:["Liegestütze","Klimmzug-Stufe","Schlingen-Rudern","Kniebeugen","Hängendes Knieheben"]}
+};
+/* Körpergewicht-Übungen: nur Wdh + eine Variante/Stufe pro Übung. Alle anderen: Gewicht (kg) + Wdh. */
+const BW = {
+  "Klimmzug-Stufe":"z. B. Negativ 5 s, Fußhilfe, frei",
+  "Liegestütz-Stufe":"z. B. Hände erhöht, Boden, Füße erhöht",
+  "Schlingen-Rudern":"z. B. steil, mittel, flach",
+  "Pike-Liegestütze":"z. B. Boden, Füße auf Stuhl",
+  "Schlingen-Bizepscurl":"z. B. steil, mittel, flach",
+  "Schlingen-Trizepsstrecken":"z. B. steil, mittel, flach",
+  "Hängendes Knieheben":"z. B. Knie, Beine gestreckt",
+  "Hängendes Knie-/Beinheben":"z. B. Knie, Beine gestreckt",
+  "Dips":"z. B. frei, Maschine −20 kg Hilfe",
+  "Klimmzüge":"z. B. frei, Maschine −25 kg Hilfe, negativ",
+  "Liegestütze":"z. B. Hände erhöht, Boden",
+  "Kniebeugen":"ohne Gewicht"
+};
+const HINT = { "Rudern":"Kabelrudern: kg eintragen · Australian Rows: kg leer lassen, Variante in die Notiz", "Bulgarian Split Squat":"kg pro Hand; ohne Hanteln: leer lassen", "Goblet Squat":"Gewicht der Hantel", "Rumänisches Kreuzheben (KH)":"kg pro Hand", "Schrägbankdrücken (KH)":"kg pro Hand", "Seitheben (KH)":"kg pro Hand", "Kurzhantel-Curls":"kg pro Hand", "Wadenheben sitzend (Maschine)":"kg auf der Maschine", "Kabel-Crunch":"kg am Kabelzug (oder Stufe)", "Trizepsdrücken (Kabel)":"kg am Kabelzug (oder Stufe)", "Face Pulls":"kg am Kabelzug (oder Stufe)" };
+const loadTxt = z => z.load ? (/^[0-9]+([.,][0-9]+)?$/.test(String(z.load)) ? z.load+" kg × " : z.load+" × ") : "";
+const WEEK_SCALES = [
+  ["energy","Energie","1 = sehr niedrig","5 = sehr hoch"],
+  ["stress","Stress","1 = kaum","5 = sehr hoch"],
+  ["hunger","Hunger","1 = kaum","5 = ständig"],
+  ["recovery","Erholung","1 = schlecht","5 = sehr gut"],
+  ["nutrition","Ernährung umgesetzt","1 = kaum","5 = komplett"]
+];
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2,"0");
+const isoDate = d => d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+const today = () => isoDate(new Date());
+const num = v => { if(v==null) return null; const s=String(v).trim().replace(",","."); if(s==="") return null; const n=Number(s); return Number.isFinite(n)?n:null; };
+const fmt = (n,d=1) => n==null ? "–" : n.toLocaleString("de-DE",{minimumFractionDigits:d,maximumFractionDigits:d});
+const deDate = s => { const [y,m,d]=s.split("-"); return d+"."+m+"."; };
+function monday(s){ const d=new Date(s+"T12:00:00"); d.setDate(d.getDate()-((d.getDay()+6)%7)); return isoDate(d); }
+function addDays(s,n){ const d=new Date(s+"T12:00:00"); d.setDate(d.getDate()+n); return isoDate(d); }
+function isoWeek(s){ const d=new Date(s+"T12:00:00"); d.setDate(d.getDate()-((d.getDay()+6)%7)+3); const y=d.getFullYear(); const jan4=new Date(y,0,4,12); jan4.setDate(jan4.getDate()-((jan4.getDay()+6)%7)+3); const w=1+Math.round((d-jan4)/604800000); return y+"-W"+pad(w); }
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>t.hidden=true,2200); }
+
+let db=null, sessions=[], daily=[], weekly=[];
+const form = { unit:"A", sets:{}, sleepQ:null, week:{} };
+
+/* Tabs */
+document.getElementById("ltabs").addEventListener("click",e=>{
+  const b=e.target.closest("button[data-tab]"); if(!b) return;
+  document.querySelectorAll("#ltabs button").forEach(x=>x.setAttribute("aria-selected",String(x===b)));
+  ["training","morgen","woche","verlauf"].forEach(t=>$("p-"+t).hidden = t!==b.dataset.tab);
+  if(b.dataset.tab==="verlauf") renderHistory();
+  if(b.dataset.tab==="woche") renderWeek();
+});
+
+/* Training */
+function defaultUnit(){ return ({1:"A",3:"L",5:"B",6:"C"})[new Date().getDay()] || "A"; }
+function renderUnitButtons(){
+  $("t-unit").innerHTML = Object.entries(UNITS).map(([k,u])=>`<button type="button" data-unit="${k}" aria-pressed="${k===form.unit}">${u.label}</button>`).join("");
+}
+$("t-unit").addEventListener("click",e=>{ const b=e.target.closest("button[data-unit]"); if(!b) return; form.unit=b.dataset.unit; form.sets={}; renderUnitButtons(); renderExercises(); });
+function lastFor(unit,name){
+  const s = sessions.find(x=>x.unit===unit && (x.exercises||[]).some(e=>e.name===name && ((e.sets||[]).some(z=>z.reps!=null||z.load)||e.variant)));
+  if(!s) return null;
+  const e = s.exercises.find(e=>e.name===name);
+  return { date:s.date, variant:e.variant||null, sets:e.sets.filter(z=>z.reps!=null||z.load) };
+}
+function renderExercises(){
+  const u=UNITS[form.unit];
+  $("t-run").hidden=!u.run; $("t-rir-wrap").hidden=!!u.run; $("t-rpe-wrap").hidden=!u.run;
+  if(u.run){ $("t-ex").innerHTML=`<p class="note">${u.name}: im Sprechtempo. Dauer reicht, Strecke ist optional.</p>`; return; }
+  $("t-ex").innerHTML = u.ex.map((name,i)=>{
+    const n = form.sets[i] || 3; form.sets[i]=n;
+    const last = lastFor(form.unit,name);
+    const bw = name in BW;
+    const lastTxt = last ? `Letztes Mal (${deDate(last.date)}): `+(last.variant?last.variant+" · ":"")+last.sets.map(z=>loadTxt(z)+(z.reps??"–")).join(" · ") : "Noch kein Eintrag";
+    const p = last ? last.sets : [];
+    let rows, top="";
+    if(bw){
+      top = `<div class="field" style="gap:4px"><label for="ex-${i}-var" style="font-size:.8rem">Variante / Stufe</label><input id="ex-${i}-var" placeholder="${(last&&last.variant)||BW[name]}"></div>`;
+      rows = `<span></span><span class="h">Wdh</span>`;
+      for(let j=0;j<n;j++) rows += `<span class="n">${j+1}</span><input id="ex-${i}-${j}-reps" inputmode="numeric" aria-label="${name} Satz ${j+1} Wiederholungen" placeholder="${(p[j]&&p[j].reps!=null)?p[j].reps:""}">`;
+    } else {
+      rows = `<span></span><span class="h">Gewicht (kg)</span><span class="h">Wdh</span>`;
+      for(let j=0;j<n;j++) rows += `<span class="n">${j+1}</span><input id="ex-${i}-${j}-load" inputmode="decimal" aria-label="${name} Satz ${j+1} Gewicht in kg" placeholder="${(p[j]&&p[j].load)||""}"><input id="ex-${i}-${j}-reps" inputmode="numeric" aria-label="${name} Satz ${j+1} Wiederholungen" placeholder="${(p[j]&&p[j].reps!=null)?p[j].reps:""}">`;
+    }
+    const hint = !bw && HINT[name] ? `<div class="note" style="margin:0">${HINT[name]}</div>` : "";
+    return `<div class="ex"><h3>${name}<span class="typ">${bw?"Körpergewicht":"Gewicht"}</span></h3><div class="last">${lastTxt}</div>${top}${hint}<div class="sets${bw?" bw":""}">${rows}</div><button type="button" class="link" data-add="${i}">+ Satz</button></div>`;
+  }).join("");
+}
+$("t-ex").addEventListener("click",e=>{
+  const b=e.target.closest("button[data-add]"); if(!b) return;
+  const i=+b.dataset.add; const keep=collectSets(); form.sets[i]=(form.sets[i]||3)+1; renderExercises(); restoreSets(keep);
+});
+function collectSets(){ const out={}; document.querySelectorAll("#t-ex input").forEach(el=>out[el.id]=el.value); return out; }
+function restoreSets(v){ Object.entries(v).forEach(([id,val])=>{ const el=$(id); if(el) el.value=val; }); }
+
+$("t-save").addEventListener("click", async ()=>{
+  if(!db){ toast("Speichern nicht verfügbar"); return; }
+  const u=UNITS[form.unit], date=$("t-date").value||today();
+  const doc={ date, week:isoWeek(date), unit:form.unit, unitName:u.name, rir:u.run?null:num($("t-rir").value), note:$("t-note").value.trim()||null, savedAt:new Date().toISOString() };
+  let has=false;
+  if(u.run){ doc.minutes=num($("r-min").value); doc.km=num($("r-km").value); doc.rpe=num($("r-rpe").value); has = doc.minutes!=null||doc.km!=null; }
+  else{
+    doc.exercises = u.ex.map((name,i)=>{
+      const bw = name in BW; const sets=[];
+      for(let j=0;j<(form.sets[i]||3);j++){ const le=$(`ex-${i}-${j}-load`); const load=le?(le.value||"").trim().replace(/\s*kg$/i,""):""; const reps=num($(`ex-${i}-${j}-reps`).value); if(load||reps!=null){ sets.push({load:load||null,reps}); } }
+      const ve=$(`ex-${i}-var`); const variant=ve?(ve.value.trim()||null):null;
+      if(sets.length) has=true; const o={name,type:bw?"bw":"kg",sets}; if(variant) o.variant=variant; return o;
+    }).filter(e=>e.sets.length);
+  }
+  if(!has && !doc.note){ toast("Trag mindestens einen Wert ein"); return; }
+  const btn=$("t-save"); btn.disabled=true;
+  try{
+    await db.collection("sessions").doc(date+"_"+form.unit+"_"+Date.now().toString(36)).set(doc);
+    toast("Einheit gespeichert");
+    $("t-note").value=""; $("t-rir").value=""; $("r-rpe").value=""; $("r-min").value=""; $("r-km").value=""; form.sets={}; renderExercises();
+  }catch(err){ toast(err&&err.code==="quota_exceeded"?"Speicher voll – sag Claude Bescheid":"Speichern fehlgeschlagen, bitte nochmal"); }
+  btn.disabled=false;
+});
+
+/* Morgen */
+function renderChips(el,field,val){
+  el.innerHTML=[1,2,3,4,5].map(v=>`<button type="button" data-v="${v}" aria-pressed="${val===v}">${v}</button>`).join("");
+}
+$("m-sleepq").addEventListener("click",e=>{ const b=e.target.closest("button[data-v]"); if(!b) return; const v=+b.dataset.v; form.sleepQ = form.sleepQ===v?null:v; renderChips($("m-sleepq"),"sleepQ",form.sleepQ); });
+function loadMorning(){
+  const d=daily.find(x=>x.date===$("m-date").value);
+  $("m-weight").value = d&&d.weightKg!=null ? String(d.weightKg).replace(".",",") : "";
+  $("m-sleep").value = d&&d.sleepH!=null ? String(d.sleepH).replace(".",",") : "";
+  form.sleepQ = d? (d.sleepQ??null) : null; renderChips($("m-sleepq"),"sleepQ",form.sleepQ);
+}
+$("m-date").addEventListener("change",loadMorning);
+$("m-save").addEventListener("click", async ()=>{
+  if(!db){ toast("Speichern nicht verfügbar"); return; }
+  const date=$("m-date").value||today();
+  const doc={date, week:isoWeek(date), weightKg:num($("m-weight").value), sleepH:num($("m-sleep").value), sleepQ:form.sleepQ};
+  if(doc.weightKg==null&&doc.sleepH==null&&doc.sleepQ==null){ toast("Trag mindestens einen Wert ein"); return; }
+  $("m-save").disabled=true;
+  try{ await db.collection("daily").doc(date).set(doc); toast("Morgenwerte gespeichert"); }catch(e){ toast("Speichern fehlgeschlagen, bitte nochmal"); }
+  $("m-save").disabled=false;
+});
+function renderMorningList(){
+  $("m-list").innerHTML = daily.slice(0,7).map(d=>`<tr><td>${deDate(d.date)}</td><td class="num">${fmt(d.weightKg)}</td><td class="num">${fmt(d.sleepH)}</td><td class="num">${d.sleepQ??"–"}</td></tr>`).join("") || `<tr><td colspan="4" class="note">Noch keine Morgenwerte. Der erste Eintrag erscheint hier.</td></tr>`;
+}
+
+/* Woche */
+let weekStart = monday(today());
+function weekStats(ws){
+  const we=addDays(ws,6);
+  const ses=sessions.filter(s=>s.date>=ws&&s.date<=we);
+  const dd=daily.filter(d=>d.date>=ws&&d.date<=we);
+  const w=dd.map(d=>d.weightKg).filter(v=>v!=null), sl=dd.map(d=>d.sleepH).filter(v=>v!=null);
+  const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+  return {ses, avgW:avg(w), nW:w.length, avgS:avg(sl)};
+}
+function renderWeek(){
+  const id=isoWeek(weekStart), st=weekStats(weekStart);
+  $("w-label").textContent = "KW "+id.slice(6)+" · "+deDate(weekStart)+"–"+deDate(addDays(weekStart,6));
+  $("w-sessions").textContent = st.ses.length ? st.ses.map(s=>UNITS[s.unit]?UNITS[s.unit].label:s.unit).join(" ") : "0";
+  $("w-avg").textContent = st.avgW==null?"–":fmt(st.avgW)+(st.nW<3?"*":"");
+  $("w-sleep").textContent = fmt(st.avgS);
+  const w = weekly.find(x=>x.id===id) || {};
+  if(form.week.id!==id){ form.week={id}; WEEK_SCALES.forEach(([k])=>form.week[k]=w[k]??null);
+    $("w-waist").value = w.waistCm!=null?String(w.waistCm).replace(".",","):""; $("w-good").value=w.review||""; $("w-next-txt").value=w.nextWeek||""; $("w-changes").value=w.changes||""; }
+  $("w-scales").innerHTML = WEEK_SCALES.map(([k,l,lo,hi])=>`<div class="field"><span class="lbl">${l}</span><div class="chips" data-scale="${k}">${[1,2,3,4,5].map(v=>`<button type="button" data-v="${v}" aria-pressed="${form.week[k]===v}">${v}</button>`).join("")}</div><div class="scale"><span>${lo}</span><span>${hi}</span></div></div>`).join("");
+}
+$("w-scales").addEventListener("click",e=>{ const b=e.target.closest("button[data-v]"); if(!b) return; const k=b.parentElement.dataset.scale, v=+b.dataset.v; form.week[k]=form.week[k]===v?null:v; renderWeek(); });
+$("w-prev").addEventListener("click",()=>{ weekStart=addDays(weekStart,-7); renderWeek(); });
+$("w-next").addEventListener("click",()=>{ weekStart=addDays(weekStart,7); renderWeek(); });
+$("w-save").addEventListener("click", async ()=>{
+  if(!db){ toast("Speichern nicht verfügbar"); return; }
+  const id=isoWeek(weekStart), st=weekStats(weekStart);
+  const doc={ id, weekStart, waistCm:num($("w-waist").value), review:$("w-good").value.trim()||null, nextWeek:$("w-next-txt").value.trim()||null, changes:$("w-changes").value.trim()||null,
+    sessionsDone:st.ses.length, sessionUnits:st.ses.map(s=>s.unit), weightAvgKg:st.avgW==null?null:Math.round(st.avgW*10)/10, weightDays:st.nW, sleepAvgH:st.avgS==null?null:Math.round(st.avgS*10)/10, savedAt:new Date().toISOString() };
+  WEEK_SCALES.forEach(([k])=>doc[k]=form.week[k]??null);
+  $("w-save").disabled=true;
+  try{ await db.collection("weekly").doc(id).set(doc); toast("Wochen-Check gespeichert"); }catch(e){ toast("Speichern fehlgeschlagen, bitte nochmal"); }
+  $("w-save").disabled=false;
+});
+
+/* Verlauf */
+function renderHistory(){
+  const weeks=new Set([...daily.map(d=>monday(d.date)),...sessions.map(s=>monday(s.date)),...weekly.map(w=>w.weekStart).filter(Boolean)]);
+  const list=[...weeks].sort().reverse().slice(0,16);
+  $("v-weeks").innerHTML = list.map(ws=>{ const st=weekStats(ws), w=weekly.find(x=>x.id===isoWeek(ws))||{};
+    return `<tr><td>KW ${isoWeek(ws).slice(6)}</td><td class="num">${fmt(st.avgW)}</td><td class="num">${fmt(w.waistCm)}</td><td class="num">${st.ses.length}</td><td class="num">${w.energy??"–"}</td><td class="num">${w.stress??"–"}</td></tr>`; }).join("")
+    || `<tr><td colspan="6" class="note">Noch keine Daten. Nach der ersten Woche siehst du hier deine Wochenwerte.</td></tr>`;
+  const pts=[...list].reverse().map(ws=>({ws,v:weekStats(ws).avgW})).filter(p=>p.v!=null);
+  if(pts.length<2){ $("v-chart").innerHTML=`<p class="note">Der Verlauf erscheint ab zwei Wochen mit Gewichtsmessungen.</p>`; }
+  else{
+    const W=600,H=160,L=40,R=12,T=12,B=26; const vs=pts.map(p=>p.v); let lo=Math.floor(Math.min(...vs)-0.5), hi=Math.ceil(Math.max(...vs)+0.5);
+    const x=i=>L+(W-L-R)*(pts.length===1?0:i/(pts.length-1)), y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
+    let g=""; for(let v=lo; v<=hi; v++){ g+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end">${v}</text>`; }
+    const path=pts.map((p,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(p.v).toFixed(1)).join(" ");
+    const area=path+` L${x(pts.length-1).toFixed(1)} ${H-B} L${L} ${H-B} Z`;
+    const labels=pts.map((p,i)=>`<text x="${x(i)}" y="${H-8}" text-anchor="middle">${isoWeek(p.ws).slice(6)}</text>`).join("");
+    const last=pts[pts.length-1];
+    $("v-chart").innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Wöchentliches Durchschnittsgewicht">${g}<path d="${area}" fill="var(--accent)" fill-opacity=".12"/><path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5"/><circle cx="${x(pts.length-1)}" cy="${y(last.v)}" r="4.5" fill="var(--accent)"/>${labels}</svg>`;
+  }
+  $("v-sessions").innerHTML = sessions.slice(0,15).map(s=>{
+    const u=UNITS[s.unit]; const det = s.unit==="L" ? `Dauer: ${s.minutes??"–"} Min · Strecke: ${s.km??"–"} km${s.rpe!=null?" · Anstrengung: "+s.rpe+"/10":""}` : (s.exercises||[]).map(e=>e.name+": "+(e.variant?"("+e.variant.replace(/</g,"&lt;")+") ":"")+e.sets.map(z=>loadTxt(z)+(z.reps??"–")).join(" · ")).join("\n");
+    return `<details><summary><span class="tag">${u?u.label:s.unit}</span>${deDate(s.date)} · ${u?u.name:""}</summary><div class="detail">${det}${s.rir!=null?"\nØ RIR: "+s.rir:""}${s.note?"\nNotiz: "+s.note.replace(/</g,"&lt;"):""}</div></details>`;
+  }).join("") || `<p class="note">Noch keine Einheiten. Deine erste gespeicherte Einheit erscheint hier.</p>`;
+}
+
+/* Kalender: frühere Einheiten */
+const MONTHS=["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+const WD=["Mo","Di","Mi","Do","Fr","Sa","So"];
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+const cal={y:0,m:0,sel:null};
+function calOpen(){
+  const ref = sessions.length ? sessions[0].date : today();
+  const [y,m]=ref.split("-").map(Number); cal.y=y; cal.m=m-1; cal.sel=sessions.length?ref:null;
+  $("calSheet").hidden=false; document.body.style.overflow="hidden"; calRender(); $("calClose").focus();
+}
+function calClose(){ $("calSheet").hidden=true; document.body.style.overflow=""; $("calOpen").focus(); }
+function calRender(){
+  $("calMonth").textContent=MONTHS[cal.m]+" "+cal.y;
+  const dates=new Set(sessions.map(s=>s.date));
+  const first=new Date(cal.y,cal.m,1,12), lead=(first.getDay()+6)%7, days=new Date(cal.y,cal.m+1,0).getDate(), t=today();
+  let h=WD.map(w=>`<div class="wd">${w}</div>`).join("")+"<div></div>".repeat(lead);
+  for(let d=1; d<=days; d++){
+    const ds=cal.y+"-"+pad(cal.m+1)+"-"+pad(d), has=dates.has(ds);
+    h+=`<button type="button" class="d${has?" has":""}${ds===t?" today":""}" ${has?`data-d="${ds}" aria-pressed="${ds===cal.sel}"`:"disabled"} aria-label="${d}. ${MONTHS[cal.m]}${has?", Einheit eingetragen":""}">${d}</button>`;
+  }
+  $("calGrid").innerHTML=h;
+  calRenderDay();
+}
+function calRenderDay(){
+  if(!cal.sel){ $("calDay").innerHTML=`<p class="muted">${sessions.length?"Tippe auf einen markierten Tag.":"Noch keine Einheiten gespeichert."}</p>`; return; }
+  const list=sessions.filter(s=>s.date===cal.sel);
+  const [y,m,d]=cal.sel.split("-");
+  const wd=WD[(new Date(cal.sel+"T12:00:00").getDay()+6)%7];
+  $("calDay").innerHTML=`<b>${wd}, ${d}.${m}.${y}</b>`+list.map(s=>{
+    const u=UNITS[s.unit]; let body="";
+    if(s.unit==="L"){
+      body=`<div class="exr"><span>Dauer</span><span class="s">${s.minutes??"–"} Min</span><span>Strecke</span><span class="s">${s.km!=null?fmt(s.km,1)+" km":"–"}</span>${s.rpe!=null?`<span>Anstrengung</span><span class="s">${s.rpe}/10</span>`:""}</div>`;
+    } else {
+      body=(s.exercises||[]).map(e=>`<div class="exr"><span>${esc(e.name)}</span><span class="s">${e.sets.map(z=>esc(loadTxt(z))+(z.reps??"–")).join(" · ")}</span>${e.variant?`<span class="v">${esc(e.variant)}</span>`:""}</div>`).join("");
+    }
+    const extra=(s.rir!=null?`<div class="muted">Ø Reserve: ${s.rir} Wdh</div>`:"")+(s.note?`<div class="muted">Notiz: ${esc(s.note)}</div>`:"");
+    return `<div class="card"><h4><span class="tag">${u?u.label:esc(s.unit)}</span>${u?u.name:""}</h4>${body}${extra}</div>`;
+  }).join("");
+}
+$("calOpen").addEventListener("click",calOpen);
+$("calClose").addEventListener("click",calClose);
+$("calSheet").addEventListener("click",e=>{ if(e.target.id==="calSheet") calClose(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&!$("calSheet").hidden) calClose(); });
+$("calPrev").addEventListener("click",()=>{ cal.m--; if(cal.m<0){cal.m=11;cal.y--;} calRender(); });
+$("calNext").addEventListener("click",()=>{ cal.m++; if(cal.m>11){cal.m=0;cal.y++;} calRender(); });
+$("calGrid").addEventListener("click",e=>{ const b=e.target.closest("button[data-d]"); if(!b) return; cal.sel=b.dataset.d; calRender(); });
+
+/* Init */
+$("t-date").value=today(); $("m-date").value=today();
+form.unit=defaultUnit(); renderUnitButtons(); renderExercises(); renderChips($("m-sleepq"),"sleepQ",null); renderMorningList(); renderWeek();
+
+(async ()=>{
+  db = window.claude && window.claude.use ? await window.claude.use("db") : null;
+  if(!db){ $("dbBanner").hidden=false; return; }
+  const err=()=>{};
+  db.collection("sessions").orderBy("date","desc").limit(300).onSnapshot(s=>{ sessions=s.docs.map(d=>d.data()); if(!$("calSheet").hidden) calRender(); const keep=collectSets(); renderExercises(); restoreSets(keep); renderWeek(); if(!$("p-verlauf").hidden) renderHistory(); }, err);
+  db.collection("daily").orderBy("date","desc").limit(400).onSnapshot(s=>{ daily=s.docs.map(d=>d.data()); renderMorningList(); if(document.activeElement===document.body||!$("p-morgen").contains(document.activeElement)) loadMorning(); renderWeek(); if(!$("p-verlauf").hidden) renderHistory(); }, err);
+  db.collection("weekly").orderBy("id","desc").limit(104).onSnapshot(s=>{ weekly=s.docs.map(d=>d.data()); form.week={}; renderWeek(); if(!$("p-verlauf").hidden) renderHistory(); }, err);
+})();
+
+window.__logUnit=k=>{if(!UNITS[k])return;form.unit=k;form.sets={};renderUnitButtons();renderExercises();document.getElementById("tab-training").click();};
+
+}</script>
+<script>
+(function(){const h=location.hash.slice(1);
+ if(h==="essen")__show("food");
+ else if(h==="log")__show("log");
+ else if(h==="morgen"){__show("log");document.getElementById("tab-morgen").click();}
+ else if(h==="woche"){__show("log");document.getElementById("tab-woche").click();}
+})();
+</script>
+
+<link rel="stylesheet" href="app-extra.css">
+<script>window.AppShell.init();</script>
+</body>
+</html>
