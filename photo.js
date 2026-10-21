@@ -9,13 +9,14 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const API = "https://generativelanguage.googleapis.com/v1beta/models/";
-  const DEFAULT_MODEL = "gemini-3.8-flash", FALLBACK_MODEL = "gemini-3.5-flash-lite";
-  const TIMEOUT_MS = 40000, MAX_EDGE = 1024, MAX_FILE = 30 * 1024 * 1024, DEFAULT_DAILY = 25;
+  // Flash-Lite antwortet in wenigen Sekunden; 3.8 Flash „denkt“ lange und dient nur noch als Ersatz.
+  const DEFAULT_MODEL = "gemini-3.5-flash-lite", FALLBACK_MODEL = "gemini-3.8-flash";
+  const TIMEOUT_MS = 25000, FALLBACK_TIMEOUT_MS = 60000, MAX_EDGE = 1024, MAX_FILE = 30 * 1024 * 1024, DEFAULT_DAILY = 25;
   const CATS = [["fruehstueck", "Frühstück"], ["mittag", "Mittag"], ["abend", "Abend"], ["snack", "Snack"]];
   const FRACTIONS = [[1, "Alles"], [0.75, "¾"], [0.5, "½"], [0.25, "¼"]];
 
   let db = null, cfg = null, blsP = null;
-  const st = { view: "idle", blob: null, url: null, busy: false, meal: null, editing: null, answered: {}, saving: false, ctrl: null };
+  const st = { view: "idle", blob: null, url: null, busy: false, meal: null, editing: null, answered: {}, saving: false, ctrl: null, ctrls: new Set(), cmp: null };
 
   /* ---------- Einstellungen ---------- */
   async function loadCfg() {
@@ -58,7 +59,7 @@
     pickView();
   }
   function close() {
-    if (st.ctrl) { try { st.ctrl.abort(); } catch (_) {} }
+    st.ctrls.forEach((c) => { try { c.abort(); } catch (_) {} }); st.ctrls.clear(); st.cmp = null;
     $("photoSheet").hidden = true; document.body.style.overflow = "";
     dropPhoto(); st.meal = null; st.busy = false; st.saving = false; st.editing = null; st.view = "idle";
   }
@@ -142,7 +143,7 @@
   function previewView() {
     view("preview", `<img class="ph-prev" src="${st.url}" alt="Vorschau der Mahlzeit">
       <p class="muted small" style="margin:0">Beim Analysieren wird dieses verkleinerte Foto über deinen Worker an Google Gemini geschickt. Gespeichert wird es nicht.</p>`,
-      `${btn("analyze", "Analysieren", "primary")}<div class="sc-row">${btn("replace", "Anderes Foto", "ghost")}${btn("close", "Abbrechen", "ghost")}</div>`, "Vorschau");
+      `${btn("analyze", "Analysieren", "primary")}<div class="sc-row">${btn("replace", "Anderes Foto", "ghost")}${btn("close", "Abbrechen", "ghost")}</div>${btn("compare", "Test: Modelle vergleichen (4 Anfragen)", "ghost small")}`, "Vorschau");
   }
 
   /* ---------- Analyse ---------- */
@@ -173,34 +174,35 @@ Antworte nur mit JSON nach dem Schema.`;
   };
 
   function fetchT(url, opts, ms) {
-    const ctrl = new AbortController(); st.ctrl = ctrl;
+    const ctrl = new AbortController(); st.ctrl = ctrl; st.ctrls.add(ctrl);
     const t = setTimeout(() => ctrl.abort(), ms || TIMEOUT_MS);
-    return fetch(url, Object.assign({}, opts, { signal: ctrl.signal })).finally(() => clearTimeout(t));
+    return fetch(url, Object.assign({}, opts, { signal: ctrl.signal })).finally(() => { clearTimeout(t); st.ctrls.delete(ctrl); });
   }
   const b64 = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
 
   /* Gemini 3 „denkt“ standardmäßig vor der Antwort – das kostet viel Zeit. Für das Hauptmodell wird das Denken
      auf „low“ begrenzt; lehnt Google die Einstellung ab (400), wird einmal ohne sie wiederholt. */
-  async function callGemini(model, data, thinking) {
+  async function callGemini(model, data, thinking, ms, noRetry) {
     const gc = { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0.2 };
     if (thinking) gc.thinkingConfig = { thinkingLevel: thinking };
     const body = { contents: [{ role: "user", parts: [{ text: PROMPT }, { inlineData: { mimeType: "image/jpeg", data } }] }], generationConfig: gc };
     let r;
     try {
-      r = await fetchT(cfg.workerUrl + "/analyze", { method: "POST", headers: { "Content-Type": "application/json", "X-App-Token": cfg.appToken }, body: JSON.stringify({ model, request: body }) });
+      r = await fetchT(cfg.workerUrl + "/analyze", { method: "POST", headers: { "Content-Type": "application/json", "X-App-Token": cfg.appToken }, body: JSON.stringify({ model, request: body }) }, ms);
     } catch (e) {
       if (e && e.name === "AbortError") return { err: "timeout" };
       return { err: "network" };
     }
     let j = null; try { j = await r.json(); } catch (_) {}
     const detail = j && (j.error && j.error.status || j.error);
-    if (r.status === 400 && thinking && detail === "INVALID_ARGUMENT") return callGemini(model, data, null);
-    if (!r.ok) return { err: r.status, detail };
+    if (r.status === 400 && thinking && !noRetry && detail === "INVALID_ARGUMENT") return callGemini(model, data, null, ms);
+    if (!r.ok) return { err: r.status, detail, message: j && j.error && typeof j.error.message === "string" ? j.error.message.slice(0, 160) : "" };
     if (j && j.promptFeedback && j.promptFeedback.blockReason) return { err: "blocked" };
     const cand = j && j.candidates && j.candidates[0];
     const text = cand && cand.content && Array.isArray(cand.content.parts) ? cand.content.parts.map((p) => p.text || "").join("") : "";
     if (!text) return { err: cand && cand.finishReason === "SAFETY" ? "blocked" : "empty" };
-    return { text };
+    const um = j && j.usageMetadata;
+    return { text, thoughts: um && Number.isFinite(um.thoughtsTokenCount) ? um.thoughtsTokenCount : 0 };
   }
 
   async function analyze() {
@@ -210,7 +212,7 @@ Antworte nur mit JSON nach dem Schema.`;
     const d = today(); const usage = cfg.usage && cfg.usage.date === d ? cfg.usage : { date: d, count: 0 };
     if (usage.count >= (cfg.dailyLimit || DEFAULT_DAILY)) { st.busy = false; return errorView("Tageslimit erreicht (" + (cfg.dailyLimit || DEFAULT_DAILY) + " Analysen). Morgen geht es wieder – oder trag die Mahlzeit manuell ein."); }
     if (!navigator.onLine) { st.busy = false; return errorView("Du bist offline. Die Fotoanalyse braucht Internet – manuelle Eingabe und Barcode-Scanner funktionieren weiterhin."); }
-    view("analyzing", `<img class="ph-prev dim" src="${st.url}" alt=""><div class="sc-load"><span class="sc-spin" aria-hidden="true"></span><span>Mahlzeit wird analysiert … <span id="ph-secs">0</span> s<br><span class="muted small" id="ph-step">Hauptmodell</span></span></div>`, btn("close", "Abbrechen", "ghost"), "Analyse läuft");
+    view("analyzing", `<img class="ph-prev dim" src="${st.url}" alt=""><div class="sc-load"><span class="sc-spin" aria-hidden="true"></span><span>Mahlzeit wird analysiert … <span id="ph-secs">0</span> s<br><span class="muted small" id="ph-step">Schnelles Modell</span></span></div>`, btn("close", "Abbrechen", "ghost"), "Analyse läuft");
     const t0 = Date.now(); const secs = () => Math.round((Date.now() - t0) / 1000);
     const tick = setInterval(() => { const el = document.getElementById("ph-secs"); if (el) el.textContent = secs(); else clearInterval(tick); }, 1000);
     const step = (t) => { const el = document.getElementById("ph-step"); if (el) el.textContent = t; };
@@ -218,34 +220,95 @@ Antworte nur mit JSON nach dem Schema.`;
     try {
       const data = await b64(st.blob);
       await saveCfg({ usage: { date: d, count: usage.count + 1 } });
-      const main = cfg.model || DEFAULT_MODEL;
-      let r = await callGemini(main, data, main === FALLBACK_MODEL ? null : "low");
+      let r = await callGemini(DEFAULT_MODEL, data, null, TIMEOUT_MS);
       const tMain = secs();
-      // Ersatzmodell (schneller, denkt kaum) bei Zeitüberschreitung, Überlastung oder unbekanntem Modell
-      if (st.view === "analyzing" && ["timeout", "network", 404, 429, 500, 503, 504].includes(r.err) && main !== FALLBACK_MODEL) {
-        step("Hauptmodell " + (r.err === "timeout" ? "zu langsam" : "nicht verfügbar (" + r.err + ")") + " – versuche Ersatzmodell …");
-        r = await callGemini(FALLBACK_MODEL, data, null);
+      // Ersatzmodell (gründlicher, aber langsamer) bei Zeitüberschreitung, Überlastung oder unbekanntem Modell
+      if (st.view === "analyzing" && ["timeout", "network", 404, 429, 500, 503, 504].includes(r.err)) {
+        step("Schnelles Modell " + (r.err === "timeout" ? "zu langsam" : "nicht verfügbar (" + r.err + ")") + " – versuche Ersatzmodell (kann bis zu 1 Minute dauern) …");
+        r = await callGemini(FALLBACK_MODEL, data, "low", FALLBACK_TIMEOUT_MS);
       }
       clearInterval(tick); st.busy = false;
       if (st.view !== "analyzing") return;     // inzwischen abgebrochen
-      if (r.err === "timeout") return errorView("Die Analyse hat zu lange gedauert (Zeitüberschreitung nach " + secs() + " s, Hauptmodell " + tMain + " s). Bitte nochmal versuchen.");
+      if (r.err === "timeout") return errorView("Die Analyse hat zu lange gedauert (Zeitüberschreitung nach " + secs() + " s, erstes Modell " + tMain + " s). Bitte nochmal versuchen.");
       if (r.err === "network") return errorView("Keine Verbindung zum Worker (nach " + secs() + " s). Bitte nochmal versuchen.");
       if (r.err) return errorView(errText(r.err, r.detail), r.err === 400 || r.err === 401 || r.err === 403 || r.err === 500);
       const v = N.mealValidate(r.text);
       if (!v.ok) return errorView(v.error + " Bitte nochmal versuchen.");
       if (!v.isFood) return errorView((v.message ? esc(v.message) + "<br>" : "") + "Es wurde kein Essen erkannt. Mach ein neues Foto oder trag die Mahlzeit manuell ein.", false, true);
-      const bls = await blsLoad;
-      st.answered = {};
-      st.meal = { mealId: "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), dish: v.dish, items: v.items.map((it) => matchItem(it, bls)), questions: v.questions,
-        fraction: 1, cat: guessCat(), date: window.__food ? window.__food.date() : today() };
-      dropPhoto();                              // Foto wird nicht mehr gebraucht
-      reviewView();
+      toReview(v, await blsLoad);
     } catch (e) {
       clearInterval(tick); st.busy = false;
       if (st.view !== "analyzing") return;
       errorView(e && e.name === "AbortError" ? "Die Analyse hat zu lange gedauert (Zeitüberschreitung). Bitte nochmal versuchen." : "Keine Verbindung zu Google Gemini. Bitte nochmal versuchen.");
     }
   }
+  function toReview(v, bls) {
+    st.answered = {};
+    st.meal = { mealId: "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), dish: v.dish, items: v.items.map((it) => matchItem(it, bls)), questions: v.questions,
+      fraction: 1, cat: guessCat(), date: window.__food ? window.__food.date() : today() };
+    dropPhoto();                              // Foto wird nicht mehr gebraucht
+    reviewView();
+  }
+
+  /* ---------- Test: Modelle vergleichen ----------
+     Schickt dasselbe Foto gleichzeitig in 4 Varianten (Modell × Denkstufe) und zeigt Zeit, Denk-Token und Ergebnis.
+     Keine Wiederholung ohne Denk-Einstellung: eine Ablehnung durch Google soll sichtbar werden. */
+  const VARIANTS = [
+    { model: "gemini-3.5-flash-lite", thinking: null, label: "Flash-Lite · Standard (aktuell)" },
+    { model: "gemini-3.5-flash-lite", thinking: "low", label: "Flash-Lite · Denken „low“" },
+    { model: "gemini-3.8-flash", thinking: "minimal", label: "3.8 Flash · Denken „minimal“" },
+    { model: "gemini-3.8-flash", thinking: "low", label: "3.8 Flash · Denken „low“" }
+  ];
+  async function compare() {
+    if (st.busy || !st.blob) return;
+    st.busy = true; await loadCfg();
+    const d = today(); const usage = cfg.usage && cfg.usage.date === d ? cfg.usage : { date: d, count: 0 };
+    const lim = cfg.dailyLimit || DEFAULT_DAILY;
+    if (usage.count + VARIANTS.length > lim) { st.busy = false; return errorView("Für den Vergleich fehlen heute Analysen im Tageslimit (" + usage.count + " von " + lim + " verbraucht)."); }
+    if (!navigator.onLine) { st.busy = false; return errorView("Du bist offline."); }
+    await saveCfg({ usage: { date: d, count: usage.count + VARIANTS.length } });
+    const blsLoad = loadBLS(); const data = await b64(st.blob); const t0 = Date.now();
+    st.cmp = VARIANTS.map((v) => Object.assign({ state: "läuft" }, v));
+    compareView(t0);
+    const tick = setInterval(() => { if (st.view !== "compare") return clearInterval(tick); compareView(t0); }, 1000);
+    await Promise.all(st.cmp.map(async (c) => {
+      const s0 = Date.now();
+      const r = await callGemini(c.model, data, c.thinking, FALLBACK_TIMEOUT_MS, true);
+      if (!st.cmp) return;
+      c.secs = ((Date.now() - s0) / 1000).toFixed(1);
+      if (r.err) { c.state = "fehler"; c.err = r.err === "timeout" ? "keine Antwort nach 60 s" : r.err === "network" ? "keine Verbindung" : "Fehler " + r.err + (r.detail ? " " + r.detail : "") + (r.message ? ": " + r.message : ""); }
+      else {
+        const v = N.mealValidate(r.text); c.thoughts = r.thoughts;
+        if (!v.ok) { c.state = "fehler"; c.err = v.error; }
+        else { c.state = "ok"; c.v = v; }
+      }
+      if (st.view === "compare") compareView(t0);
+    }));
+    clearInterval(tick); st.busy = false;
+    if (!st.cmp) return;
+    const bls = await blsLoad;
+    st.cmp.forEach((c) => { if (c.state === "ok") { c.items = c.v.items.map((it) => matchItem(it, bls)); c.tot = N.mealTotals(c.items, 1); } });
+    if (st.view === "compare") compareView(t0, true);
+  }
+  function compareView(t0, done) {
+    const sec = Math.round((Date.now() - t0) / 1000);
+    const rows = st.cmp.map((c, i) => {
+      let body;
+      if (c.state === "läuft") body = `<span class="muted">läuft …</span>`;
+      else if (c.state === "fehler") body = `<span class="ph-bad">${esc(c.err)}</span> <span class="muted small">(${c.secs} s)</span>`;
+      else {
+        const its = c.v.items.map((it) => esc(it.name) + " " + it.grams + " g").join(", ") || "–";
+        const kc = c.tot ? Math.round(c.tot.values.kcal) + " kcal" + (c.tot.complete ? "" : " (unvollständig)") : "";
+        body = `<b>${c.secs} s</b> · Denk-Token: ${c.thoughts}${kc ? " · " + kc : ""}<br><span class="small">${c.v.isFood ? (c.v.dish ? "<i>" + esc(c.v.dish) + "</i>: " : "") + its : "kein Essen erkannt"}</span>
+          ${done && c.v.isFood && c.v.items.length ? "<br>" + btn("cmpuse", "Dieses Ergebnis übernehmen", "ghost small", 'data-i="' + i + '"') : ""}`;
+      }
+      return `<div class="ph-cmp"><b>${esc(c.label)}</b><br>${body}</div>`;
+    }).join("");
+    view("compare", `<p class="muted small" style="margin:0">${done ? "Fertig nach " + sec + " s." : "Läuft seit " + sec + " s …"} Alle 4 Anfragen laufen gleichzeitig. Zählen 4× ins Tageslimit.</p>${rows}
+      <p class="muted small" style="margin:0">Denk-Token = wie viel das Modell vorher „nachgedacht“ hat. 0 heißt: kein Nachdenken.</p>`,
+      `<div class="sc-row">${btn("close", done ? "Schließen" : "Abbrechen", "ghost")}</div>`, "Modell-Vergleich");
+  }
+
   function errText(code, detail) {
     if (code === 401) return "Der Worker hat das App-Passwort abgelehnt. Bitte die Verbindung neu einrichten.";
     if (code === 403 && detail === "origin") return "Der Worker lehnt diese App-Adresse ab.";
@@ -412,6 +475,8 @@ Antworte nur mit JSON nach dem Schema.`;
     else if (a === "lib") { $("phLib").value = ""; $("phLib").click(); }
     else if (a === "replace") pickView();
     else if (a === "analyze") analyze();
+    else if (a === "compare") compare();
+    else if (a === "cmpuse") { const c = st.cmp && st.cmp[i]; if (c && c.v) { loadBLS().then((bls) => { st.cmp = null; toReview(c.v, bls); }); } }
     else if (a === "savekey") saveKey();
     else if (a === "rekey") keyView();
     else if (a === "gentok") { const v = curVals(); v.token = newToken(); saveCfg({ draftToken: v.token, draftUrl: v.url }); keyView("", v); }
