@@ -14,6 +14,18 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="icon-192.png">
+<!-- Startbildschirm (iPhone): dunkel wie die Start-Animation -->
+<link rel="apple-touch-startup-image" media="screen and (device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="splash-1290x2796.png">
+<link rel="apple-touch-startup-image" media="screen and (device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="splash-1320x2868.png">
+<link rel="apple-touch-startup-image" media="screen and (device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="splash-1206x2622.png">
+<link rel="apple-touch-startup-image" media="screen and (device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="splash-1179x2556.png">
+<link rel="apple-touch-startup-image" media="screen and (device-width: 420px) and (device-height: 912px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="splash-1260x2736.png">
+<link rel="apple-touch-startup-image" media="screen and (device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="splash-1170x2532.png">
+<link rel="apple-touch-startup-image" media="screen and (device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="splash-1284x2778.png">
+<link rel="apple-touch-startup-image" media="screen and (device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="splash-1125x2436.png">
+<link rel="apple-touch-startup-image" media="screen and (device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" href="splash-1242x2688.png">
+<link rel="apple-touch-startup-image" media="screen and (device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="splash-828x1792.png">
+<link rel="apple-touch-startup-image" media="screen and (device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" href="splash-750x1334.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
 <script src="localdb.js"></script>
 <script src="nutrition.js"></script>
@@ -25,6 +37,30 @@
 <script src="app.js"></script>
 </head>
 <body>
+<!-- Start-Animation: nur beim Öffnen vom Home-Bildschirm, ca. 1,5 s, Tippen überspringt -->
+<style>
+#splash{position:fixed;inset:0;z-index:100;background:#111922;display:grid;place-items:center;overflow:hidden;transition:opacity .35s ease}
+#splash.out{opacity:0;pointer-events:none}
+#splash .sp-glow{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,rgba(122,162,255,.18),rgba(122,162,255,0) 55%);animation:spFade .9s ease both}
+#splash .sp-icon{position:relative;width:230px;height:230px;filter:drop-shadow(0 14px 18px rgba(0,0,0,.45));
+  animation:spIn .7s cubic-bezier(.2,.9,.25,1.15) both,spLift .6s .8s ease-in-out both}
+#splash .sp-name{position:absolute;top:calc(50% + 92px);left:0;right:0;text-align:center;font:700 2.1rem "Barlow Condensed",system-ui,sans-serif;color:#E5EAEF;letter-spacing:.02em;animation:spUp .5s .45s ease-out both}
+@keyframes spIn{from{opacity:0;transform:translateY(46px) scale(.55) rotate(-16deg)}to{opacity:1;transform:none}}
+@keyframes spLift{0%,100%{transform:none}45%{transform:translateY(-18px) rotate(-5deg) scale(1.04)}}
+@keyframes spUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes spFade{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){#splash .sp-icon,#splash .sp-name,#splash .sp-glow{animation:spFade .3s ease both}}
+</style>
+<div id="splash" aria-hidden="true"><div class="sp-glow"></div><img class="sp-icon" src="splash-hantel.png" alt=""><div class="sp-name">myFitness</div></div>
+<script>(function(){
+  var s=document.getElementById("splash");
+  var sa=window.navigator.standalone===true||(window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches);
+  if(!sa){s.parentNode.removeChild(s);return;}
+  var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var done=false;function end(){if(done)return;done=true;s.className="out";setTimeout(function(){if(s.parentNode)s.parentNode.removeChild(s);},400);}
+  s.addEventListener("click",end);s.addEventListener("touchstart",end,{passive:true});
+  setTimeout(end,reduce?700:1550);
+})();</script>
 <style>
 /* Layout: one app, three modules (Plan, Essen, Log) under a segmented switcher */
 :root{

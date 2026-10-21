@@ -96,3 +96,9 @@ Die App zeigt dann „Neue Version verfügbar“ an.
 
 - Aktuell: 3D-Hantel (icon-512.png, icon-192.png, apple-touch-icon.png).
 - Vorheriges Hantel-Symbol bleibt erhalten: `icon-512-hantel-alt.png`, `icon-192-hantel-alt.png`, `apple-touch-icon-hantel-alt.png`. Zum Zurückwechseln diese Dateien auf die Namen ohne „-hantel-alt“ kopieren.
+
+## Start-Animation
+
+- Nur beim Öffnen vom Home-Bildschirm (Standalone-Modus), ca. 1,5 s, Tippen überspringt, bei „Bewegung reduzieren“ nur kurzes Einblenden. Code direkt am Anfang von `index.html` (`#splash`).
+- `splash-hantel.png`: freigestellte Hantel für die Animation. `splash-<Breite>x<Höhe>.png`: dunkle iPhone-Startbilder (apple-touch-startup-image), damit kein weißer Blitz erscheint.
+- Entfernen: den Block `#splash` (Style, div, script) aus `index.html` löschen.
