@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const VERSION = "1.3.0";
+  const VERSION = "1.3.2";
 
   function toast(msg) {
     const t = $("appToast"); t.textContent = msg; t.hidden = false;
@@ -59,7 +59,7 @@
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: "application/json" });
     const file = new File([blob], name, { type: "application/json" });
     try {
-      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: "Tills Fitness Sicherung" }); toast("Sicherung erstellt"); return; }
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: "myFitness Sicherung" }); toast("Sicherung erstellt"); return; }
     } catch (e) { if (e && e.name === "AbortError") return; }
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);

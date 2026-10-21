@@ -1,4 +1,4 @@
-# Tills Fitness (private Web-App)
+# myFitness (private Web-App)
 
 Trainingsplan, Ernährungs-Zähler mit Barcode-Scanner und Trainingslog. Läuft als Web-App mit Symbol auf dem
 Home-Bildschirm (PWA). Alle Dateien liegen bewusst flach in einem Ordner, damit sie sich auch vom iPhone aus hochladen lassen. **Alle persönlichen Daten liegen nur auf dem Gerät** (IndexedDB). Dieses Repository
@@ -91,3 +91,8 @@ Die App zeigt dann „Neue Version verfügbar“ an.
 - Bibliotheksrezepte bearbeiten → eigene Variante (`basedOn`), das Original bleibt unverändert.
 - „Proteinreich“ = mind. 25 g Eiweiß pro Portion und mind. 25 % der Kalorien aus Eiweiß.
 - Tests: `tests/recipe.test.js` (Logik), `tests/recipes_e2e.py` (Ablauf im Browser).
+
+## App-Symbol
+
+- Aktuell: 3D-Hantel (icon-512.png, icon-192.png, apple-touch-icon.png).
+- Vorheriges Hantel-Symbol bleibt erhalten: `icon-512-hantel-alt.png`, `icon-192-hantel-alt.png`, `apple-touch-icon-hantel-alt.png`. Zum Zurückwechseln diese Dateien auf die Namen ohne „-hantel-alt“ kopieren.

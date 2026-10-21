@@ -1,6 +1,6 @@
 {
-  "name": "Tills Fitness",
-  "short_name": "Fitness",
+  "name": "myFitness",
+  "short_name": "myFitness",
   "description": "Trainingsplan, Ernährungs-Zähler mit Barcode-Scanner und Trainingslog – privat auf dem Gerät.",
   "lang": "de",
   "start_url": "./",

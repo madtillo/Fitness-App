@@ -228,3 +228,6 @@ body{padding-bottom:calc(48px + env(safe-area-inset-bottom,0px))}
 .rz-hit{display:grid;gap:2px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;color:var(--fg);cursor:pointer;min-height:48px}
 .rz-hit span{font-size:.8rem;color:var(--muted)}
 .rz-hit:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* App-Name in gemischter Schreibweise (nicht in Großbuchstaben) */
+.shell-top h1.brand{text-transform:none}
