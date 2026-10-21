@@ -10,7 +10,7 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const API = "https://generativelanguage.googleapis.com/v1beta/models/";
   const DEFAULT_MODEL = "gemini-3.8-flash", FALLBACK_MODEL = "gemini-3.5-flash-lite";
-  const TIMEOUT_MS = 45000, MAX_EDGE = 1280, MAX_FILE = 30 * 1024 * 1024, DEFAULT_DAILY = 25;
+  const TIMEOUT_MS = 40000, MAX_EDGE = 1024, MAX_FILE = 30 * 1024 * 1024, DEFAULT_DAILY = 25;
   const CATS = [["fruehstueck", "Frühstück"], ["mittag", "Mittag"], ["abend", "Abend"], ["snack", "Snack"]];
   const FRACTIONS = [[1, "Alles"], [0.75, "¾"], [0.5, "½"], [0.25, "¼"]];
 
@@ -121,7 +121,7 @@
     }
   }
 
-  /* Verkleinern auf max. 1280 px, Ausrichtung übernehmen, als JPEG neu speichern (entfernt Standort- und Kameradaten). */
+  /* Verkleinern auf max. 1024 px, Ausrichtung übernehmen, als JPEG neu speichern (entfernt Standort- und Kameradaten). */
   async function shrink(file) {
     let src, w, h;
     try { src = await createImageBitmap(file, { imageOrientation: "from-image" }); w = src.width; h = src.height; }
@@ -179,12 +179,23 @@ Antworte nur mit JSON nach dem Schema.`;
   }
   const b64 = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = rej; r.readAsDataURL(blob); });
 
-  async function callGemini(model, data) {
-    const body = { contents: [{ role: "user", parts: [{ text: PROMPT }, { inlineData: { mimeType: "image/jpeg", data } }] }],
-      generationConfig: { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0.2 } };
-    const r = await fetchT(cfg.workerUrl + "/analyze", { method: "POST", headers: { "Content-Type": "application/json", "X-App-Token": cfg.appToken }, body: JSON.stringify({ model, request: body }) });
+  /* Gemini 3 „denkt“ standardmäßig vor der Antwort – das kostet viel Zeit. Für das Hauptmodell wird das Denken
+     auf „low“ begrenzt; lehnt Google die Einstellung ab (400), wird einmal ohne sie wiederholt. */
+  async function callGemini(model, data, thinking) {
+    const gc = { responseMimeType: "application/json", responseSchema: SCHEMA, temperature: 0.2 };
+    if (thinking) gc.thinkingConfig = { thinkingLevel: thinking };
+    const body = { contents: [{ role: "user", parts: [{ text: PROMPT }, { inlineData: { mimeType: "image/jpeg", data } }] }], generationConfig: gc };
+    let r;
+    try {
+      r = await fetchT(cfg.workerUrl + "/analyze", { method: "POST", headers: { "Content-Type": "application/json", "X-App-Token": cfg.appToken }, body: JSON.stringify({ model, request: body }) });
+    } catch (e) {
+      if (e && e.name === "AbortError") return { err: "timeout" };
+      return { err: "network" };
+    }
     let j = null; try { j = await r.json(); } catch (_) {}
-    if (!r.ok) return { err: r.status, detail: j && (j.error && j.error.status || j.error) };
+    const detail = j && (j.error && j.error.status || j.error);
+    if (r.status === 400 && thinking && detail === "INVALID_ARGUMENT") return callGemini(model, data, null);
+    if (!r.ok) return { err: r.status, detail };
     if (j && j.promptFeedback && j.promptFeedback.blockReason) return { err: "blocked" };
     const cand = j && j.candidates && j.candidates[0];
     const text = cand && cand.content && Array.isArray(cand.content.parts) ? cand.content.parts.map((p) => p.text || "").join("") : "";
@@ -199,15 +210,26 @@ Antworte nur mit JSON nach dem Schema.`;
     const d = today(); const usage = cfg.usage && cfg.usage.date === d ? cfg.usage : { date: d, count: 0 };
     if (usage.count >= (cfg.dailyLimit || DEFAULT_DAILY)) { st.busy = false; return errorView("Tageslimit erreicht (" + (cfg.dailyLimit || DEFAULT_DAILY) + " Analysen). Morgen geht es wieder – oder trag die Mahlzeit manuell ein."); }
     if (!navigator.onLine) { st.busy = false; return errorView("Du bist offline. Die Fotoanalyse braucht Internet – manuelle Eingabe und Barcode-Scanner funktionieren weiterhin."); }
-    view("analyzing", `<img class="ph-prev dim" src="${st.url}" alt=""><div class="sc-load"><span class="sc-spin" aria-hidden="true"></span>Mahlzeit wird analysiert … (meist 5–15 s)</div>`, btn("close", "Abbrechen", "ghost"), "Analyse läuft");
+    view("analyzing", `<img class="ph-prev dim" src="${st.url}" alt=""><div class="sc-load"><span class="sc-spin" aria-hidden="true"></span><span>Mahlzeit wird analysiert … <span id="ph-secs">0</span> s<br><span class="muted small" id="ph-step">Hauptmodell</span></span></div>`, btn("close", "Abbrechen", "ghost"), "Analyse läuft");
+    const t0 = Date.now(); const secs = () => Math.round((Date.now() - t0) / 1000);
+    const tick = setInterval(() => { const el = document.getElementById("ph-secs"); if (el) el.textContent = secs(); else clearInterval(tick); }, 1000);
+    const step = (t) => { const el = document.getElementById("ph-step"); if (el) el.textContent = t; };
     const blsLoad = loadBLS();
     try {
       const data = await b64(st.blob);
       await saveCfg({ usage: { date: d, count: usage.count + 1 } });
-      let r = await callGemini(cfg.model || DEFAULT_MODEL, data);
-      if ((r.err === 404 || r.err === 429 || r.err === 503) && (cfg.model || DEFAULT_MODEL) !== FALLBACK_MODEL) r = await callGemini(FALLBACK_MODEL, data);
-      st.busy = false;
+      const main = cfg.model || DEFAULT_MODEL;
+      let r = await callGemini(main, data, main === FALLBACK_MODEL ? null : "low");
+      const tMain = secs();
+      // Ersatzmodell (schneller, denkt kaum) bei Zeitüberschreitung, Überlastung oder unbekanntem Modell
+      if (st.view === "analyzing" && ["timeout", "network", 404, 429, 500, 503, 504].includes(r.err) && main !== FALLBACK_MODEL) {
+        step("Hauptmodell " + (r.err === "timeout" ? "zu langsam" : "nicht verfügbar (" + r.err + ")") + " – versuche Ersatzmodell …");
+        r = await callGemini(FALLBACK_MODEL, data, null);
+      }
+      clearInterval(tick); st.busy = false;
       if (st.view !== "analyzing") return;     // inzwischen abgebrochen
+      if (r.err === "timeout") return errorView("Die Analyse hat zu lange gedauert (Zeitüberschreitung nach " + secs() + " s, Hauptmodell " + tMain + " s). Bitte nochmal versuchen.");
+      if (r.err === "network") return errorView("Keine Verbindung zum Worker (nach " + secs() + " s). Bitte nochmal versuchen.");
       if (r.err) return errorView(errText(r.err, r.detail), r.err === 400 || r.err === 401 || r.err === 403 || r.err === 500);
       const v = N.mealValidate(r.text);
       if (!v.ok) return errorView(v.error + " Bitte nochmal versuchen.");
@@ -219,7 +241,7 @@ Antworte nur mit JSON nach dem Schema.`;
       dropPhoto();                              // Foto wird nicht mehr gebraucht
       reviewView();
     } catch (e) {
-      st.busy = false;
+      clearInterval(tick); st.busy = false;
       if (st.view !== "analyzing") return;
       errorView(e && e.name === "AbortError" ? "Die Analyse hat zu lange gedauert (Zeitüberschreitung). Bitte nochmal versuchen." : "Keine Verbindung zu Google Gemini. Bitte nochmal versuchen.");
     }

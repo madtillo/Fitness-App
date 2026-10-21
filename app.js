@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const VERSION = "1.2.1";
+  const VERSION = "1.2.2";
 
   function toast(msg) {
     const t = $("appToast"); t.textContent = msg; t.hidden = false;
