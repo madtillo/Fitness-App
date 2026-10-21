@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const VERSION = "1.0.5";
+  const VERSION = "1.2.1";
 
   function toast(msg) {
     const t = $("appToast"); t.textContent = msg; t.hidden = false;
@@ -24,9 +24,12 @@
       <input type="file" id="dtFile" accept="application/json,.json" hidden>
       <p id="dtResult" role="status"></p></div>
     <div class="dt-card"><h3>Speicher</h3><p id="dtInfo">…</p></div>
+    <div class="dt-card"><h3>Fotoanalyse (Gemini über Cloudflare Worker)</h3>
+      <p id="dtAi">…</p>
+      <div class="sc-row"><button type="button" class="sc-btn" data-dt="aikey">Verbindung ändern</button><button type="button" class="sc-btn" data-dt="aidel">Verbindung löschen</button></div></div>
     <div class="dt-card"><h3>Über die App</h3>
-      <p>Version ${VERSION}. Deine Daten liegen nur auf diesem Gerät. Beim Scannen wird nur die Barcode-Nummer an Open Food Facts geschickt, nie ein Bild.</p>
-      <p>Produktdaten: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> – Datenbank unter ODbL, Produktbilder unter CC BY-SA. Scanner: zxing-cpp / barcode-detector (MIT/Apache-2.0).</p></div>
+      <p>Version ${VERSION}. Deine Daten liegen nur auf diesem Gerät. Beim Scannen wird nur die Barcode-Nummer an Open Food Facts geschickt. Bei „Mahlzeit-Foto“ wird nach deinem Tippen auf „Analysieren“ ein verkleinertes Foto über deinen Cloudflare Worker an Google Gemini geschickt; gespeichert wird es nicht.</p>
+      <p>Produktdaten: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a> – Datenbank unter ODbL, Produktbilder unter CC BY-SA. Scanner: zxing-cpp / barcode-detector (MIT/Apache-2.0). Nährwerte für Foto-Mahlzeiten: Bundeslebensmittelschlüssel (BLS) 4.0, Max Rubner-Institut.</p></div>
   </div></div></div>`;
   }
 
@@ -41,6 +44,12 @@
       if (navigator.storage && navigator.storage.persisted) parts.push((await navigator.storage.persisted()) ? "Dauerhafter Speicher: aktiv" : "Dauerhafter Speicher: nicht bestätigt – regelmäßig sichern");
     } catch (_) {}
     $("dtInfo").textContent = parts.join(" · ") || "–";
+    try {
+      const s = await window.LocalDB.db.collection("settings").doc("ai").get(); const c = s.exists ? s.data() : {};
+      const d = new Date(), p2 = (n) => String(n).padStart(2, "0"), td = d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate());
+      const used = c.usage && c.usage.date === td ? c.usage.count : 0;
+      $("dtAi").textContent = c.workerUrl ? `Verbunden mit ${c.workerUrl.replace(/^https:\/\//, "")}. Der Gemini-Schlüssel liegt nur im Worker. Heute ${used} von ${c.dailyLimit || 25} Analysen genutzt.` : "Noch nicht eingerichtet. Wird beim ersten „Mahlzeit-Foto“ abgefragt.";
+    } catch (_) {}
   }
 
   async function doExport() {
@@ -102,9 +111,12 @@
       if (b.dataset.dt === "close") closeData();
       else if (b.dataset.dt === "export") doExport().catch(() => toast("Export fehlgeschlagen"));
       else if (b.dataset.dt === "import") { $("dtFile").value = ""; $("dtFile").click(); }
+      else if (b.dataset.dt === "aikey") { closeData(); window.PhotoMeal.openKey(); }
+      else if (b.dataset.dt === "aidel") { if (confirm("Worker-Adresse und App-Passwort von diesem Gerät löschen?")) window.PhotoMeal.clearKey().then(showInfo); }
     });
     $("dtFile").addEventListener("change", (e) => { const f = e.target.files && e.target.files[0]; if (f) doImport(f); });
     window.Scanner.init();
+    window.PhotoMeal.init();
     window.LocalDB.persist();
     registerSW();
   }

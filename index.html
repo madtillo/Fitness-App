@@ -20,6 +20,7 @@
 <script src="barcode-detector-ponyfill.js"></script>
 <script src="scan.js"></script>
 <script src="docs.js"></script>
+<script src="photo.js"></script>
 <script src="app.js"></script>
 </head>
 <body>
@@ -356,7 +357,10 @@ body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px
   </div>
   <div id="z-note" class="foot" style="margin:0" hidden></div>
   <div class="zsum" id="z-sum"></div>
-  <button type="button" class="zscan" id="z-scan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M16.5 8v8"/></svg>Barcode scannen</button>
+  <div class="zactions">
+  <button type="button" class="zscan" id="z-scan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8v8M10 8v8M13 8v8M16.5 8v8"/></svg>Barcode</button>
+  <button type="button" class="zscan" id="z-photo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Mahlzeit-Foto</button>
+  </div>
   <div class="zbox">
     <h3>Schnell hinzufügen</h3>
     <div class="zchips" id="z-quick"></div>
@@ -764,7 +768,7 @@ function zrender(){
     else if(z.mode==="range"){left=v<z.lo?"noch "+(z.lo-v)+"–"+(z.hi-v)+" "+z.u:v<=z.hi?"im Bereich ✓":(v-z.hi)+" "+z.u+" drüber";cls=v<z.lo?"":v<=z.hi?"done":"over";}
     else{const d=z.t-v;left=Math.abs(d)<=z.t*0.05?"passt ✓":d>0?"noch ca. "+d+" "+z.u:"ca. "+(-d)+" "+z.u+" drüber";cls=Math.abs(d)<=z.t*0.05?"done":d>0?"":"over";}
     return `<div class="zm"><div class="top"><b>${z.l}</b><span class="v">${v} / ${z.mode==="range"?z.lo+"–"+z.hi:z.t} ${z.u}</span></div><div class="track"><div class="fill" style="width:${pct}%;background:${z.col}"></div></div><span class="left ${cls}">${left}${miss[k]?` · ${miss[k]} Eintrag ohne Wert`:""}</span></div>`;}).join("");
-  $("z-list").innerHTML=zentries.length?zentries.map((e,i)=>`<div class="zitem"><span class="n">${zesc(e.name||"Eintrag")}</span><span class="m">${e.kcal==null?"–":Math.round(e.kcal)} kcal · ${e.p==null?"–":Math.round(e.p*10)/10} g E</span><button type="button" data-zdel="${i}" aria-label="${zesc(e.name||"Eintrag")} löschen">×</button></div>`).join(""):`<p class="foot" style="margin:0">Noch nichts eingetragen. Tipp oben auf ein Lebensmittel oder trag einen eigenen Eintrag ein.</p>`;
+  $("z-list").innerHTML=zentries.length?zentries.map((e,i)=>`<div class="zitem"><span class="n">${e.cat?`<small class="zcat">${({fruehstueck:"Frühstück",mittag:"Mittag",abend:"Abend",snack:"Snack"})[e.cat]||""}</small>`:""}${e.src==="photo"?`<button type="button" class="zedit" data-zedit="${i}">${zesc(e.name||"Eintrag")} <span aria-hidden="true">✎</span></button>`:zesc(e.name||"Eintrag")}</span><span class="m">${e.kcal==null?"–":Math.round(e.kcal)} kcal · ${e.p==null?"–":Math.round(e.p*10)/10} g E</span><button type="button" data-zdel="${i}" aria-label="${zesc(e.name||"Eintrag")} löschen">×</button></div>`).join(""):`<p class="foot" style="margin:0">Noch nichts eingetragen. Tipp oben auf ein Lebensmittel oder trag einen eigenen Eintrag ein.</p>`;
 }
 function zsave(){
   if(!zdb){zrender();return;}
@@ -785,8 +789,29 @@ async function zloadRecent(){
 window.__food={
   add:e=>{zadd(e);return zchain;},
   dateLabel:()=>{const t=ztoday();if(zdate===t)return "heute";const d=new Date(zdate+"T12:00:00");return "am "+d.toLocaleDateString("de-DE",{weekday:"short",day:"2-digit",month:"2-digit"});},
-  toast:m=>window.appToast&&window.appToast(m)
+  toast:m=>window.appToast&&window.appToast(m),
+  date:()=>zdate,
+  focusManual:()=>{const n=$("z-name");if(n){n.scrollIntoView({behavior:"smooth",block:"center"});setTimeout(()=>n.focus(),300);}},
+  /* Eintrag an beliebigem Tag speichern; gleiche mealId wird ersetzt statt doppelt angelegt */
+  addTo:async(date,entry)=>{
+    const e={...entry,at:entry.at||new Date().toISOString()};
+    if(date===zdate){const k=e.mealId?zentries.findIndex(x=>x.mealId===e.mealId):-1;if(k>=0)zentries[k]=e;else zentries.push(e);zrender();zsave();await zchain;return;}
+    if(!zdb)throw new Error("no db");
+    const snap=await zdb.collection("food").doc(date).get();const list=snap.exists?(snap.data().entries||[]).slice():[];
+    const k=e.mealId?list.findIndex(x=>x.mealId===e.mealId):-1;if(k>=0)list[k]=e;else list.push(e);
+    const t={kcal:0,p:0,f:0,c:0};list.forEach(x=>Object.keys(t).forEach(q=>{if(x[q]!=null)t[q]+=x[q];}));
+    await zdb.collection("food").doc(date).set({date,entries:list,totals:t,updatedAt:new Date().toISOString()});
+  },
+  replaceMeal:async(oldDate,mealId,newDate,entry)=>{
+    if(oldDate!==newDate){
+      if(oldDate===zdate){zentries=zentries.filter(x=>x.mealId!==mealId);zrender();zsave();await zchain;}
+      else if(zdb){const snap=await zdb.collection("food").doc(oldDate).get();if(snap.exists){const list=(snap.data().entries||[]).filter(x=>x.mealId!==mealId);const t={kcal:0,p:0,f:0,c:0};list.forEach(x=>Object.keys(t).forEach(q=>{if(x[q]!=null)t[q]+=x[q];}));await zdb.collection("food").doc(oldDate).set({date:oldDate,entries:list,totals:t,updatedAt:new Date().toISOString()});}}
+    }
+    const old=oldDate===zdate?zentries.find(x=>x.mealId===mealId):null;
+    await window.__food.addTo(newDate,{...entry,at:old&&old.at||entry.at});
+  }
 };
+$("z-photo").addEventListener("click",()=>window.PhotoMeal&&window.PhotoMeal.open());
 function zsub(){
   if(zunsub){zunsub();zunsub=null;}
   zentries=[];zrender();
@@ -797,7 +822,7 @@ $("z-quick").innerHTML=QUICK_FOODS.map((q,i)=>`<button type="button" data-zq="${
 $("z-quick").addEventListener("click",e=>{const b=e.target.closest("[data-zq]");if(!b)return;const q=QUICK_FOODS[+b.dataset.zq];zadd({name:q[0],kcal:q[1],p:q[2],f:q[3],c:q[4]});});
 $("z-recent").addEventListener("click",e=>{const b=e.target.closest("[data-zr]");if(!b)return;const r=zrecent[+b.dataset.zr];if(r.code&&window.Scanner){window.Scanner.openProduct(r.code);return;}zadd({name:r.name,kcal:r.kcal,p:r.p,f:r.f,c:r.c});});
 $("z-scan").addEventListener("click",()=>window.Scanner&&window.Scanner.open());
-$("z-list").addEventListener("click",e=>{const b=e.target.closest("[data-zdel]");if(!b)return;zentries.splice(+b.dataset.zdel,1);zrender();zsave();});
+$("z-list").addEventListener("click",e=>{const ed=e.target.closest("[data-zedit]");if(ed){const en=zentries[+ed.dataset.zedit];if(en&&window.PhotoMeal)window.PhotoMeal.open(en,zdate);return;}const b=e.target.closest("[data-zdel]");if(!b)return;zentries.splice(+b.dataset.zdel,1);zrender();zsave();});
 $("z-form").addEventListener("submit",e=>{e.preventDefault();const name=$("z-name").value.trim();const v={kcal:zn($("z-kcal").value),p:zn($("z-p").value),f:zn($("z-f").value),c:zn($("z-c").value)};
   if(!name&&v.kcal==null&&v.p==null)return;zadd({name:name||"Eintrag",...v});["z-name","z-kcal","z-p","z-f","z-c"].forEach(id=>$(id).value="");});
 $("z-date").value=zdate;

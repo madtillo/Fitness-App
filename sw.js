@@ -1,16 +1,20 @@
 /* Offline-Betrieb: App-Dateien werden auf dem Gerät zwischengespeichert.
    Strategie „zuerst Netz“: Mit Internet lädt die App immer die aktuelle Version,
    ohne Internet die zuletzt gespeicherte. Open-Food-Facts-Anfragen gehen nie über den Cache. */
-const CACHE = "tills-fitness-v6";
+const CACHE = "tills-fitness-v9";
 const SHELL = [
   "./", "index.html", "manifest.webmanifest",
-  "app-extra.css", "localdb.js", "nutrition.js", "scan.js", "app.js", "docs.js",
+  "app-extra.css", "localdb.js", "nutrition.js", "scan.js", "app.js", "docs.js", "photo.js",
   "barcode-detector-ponyfill.js", "zxing_reader.wasm",
   "icon-192.png", "icon-512.png", "apple-touch-icon.png"
 ];
+const OPTIONAL = ["bls.js"];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))
+    // Optionale Dateien (z. B. Nährwert-Datenbank): fehlen sie, scheitert die Installation nicht
+    .then(() => Promise.all(OPTIONAL.map((u) => c.add(new Request(u, { cache: "reload" })).catch(() => {})))))
+    .then(() => self.skipWaiting()));
 });
 self.addEventListener("message", (e) => { if (e.data === "skipWaiting") self.skipWaiting(); });
 self.addEventListener("activate", (e) => {
@@ -19,7 +23,7 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET") return;
-  if (url.hostname.endsWith("openfoodfacts.org")) return;
+  if (url.hostname.endsWith("openfoodfacts.org") || url.hostname.endsWith("googleapis.com") && !url.hostname.startsWith("fonts")) return;
   const sameOrigin = url.origin === self.location.origin;
   const isFont = url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com";
   if (!sameOrigin && !isFont) return;

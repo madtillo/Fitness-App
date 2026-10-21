@@ -14,6 +14,9 @@ enthält nur den Programmcode, keine persönlichen Daten.
 | `scan.js` | Scanner-Ansicht, Produktsuche, eigene Produkte und Korrekturen |
 | `app.js` | Daten-Menü (Sicherung), Meldungen, Offline-Betrieb und Updates |
 | `barcode-detector-ponyfill.js`, `zxing_reader.wasm` | Barcode-Erkennung [barcode-detector](https://github.com/Sec-ant/barcode-detector) 3.2.2 + zxing-wasm 3.1.3 (MIT). Liegt lokal und funktioniert offline |
+| `docs.js` | Ausführliche Erklärungen (Trainings- und Ernährungsplan, Stand 15.10.2026) für das Buch-Symbol oben rechts |
+| `photo.js` | Foto-Mahlzeit: Foto → Analyse mit Google Gemini (Schlüssel nur auf dem Gerät) → Prüfen/Korrigieren → Speichern |
+| `bls.js` | Nährwert-Datenbank Bundeslebensmittelschlüssel 4.0 (optional, aus der offiziellen Excel-Datei erzeugt) |
 | `sw.js` | Service Worker: App-Dateien offline verfügbar |
 
 ## Daten
@@ -64,3 +67,14 @@ Kamera und nachgestellter Open-Food-Facts-Antwort. **Sie ersetzen keinen Test au
 3. Hochladen (Push).
 
 Die App zeigt dann „Neue Version verfügbar“ an.
+
+## Foto-Mahlzeiten
+
+- Analyse: Google Gemini API (`generateContent`, Modell `gemini-3.8-flash`, Ersatz `gemini-3.5-flash-lite`), kostenloses Kontingent.
+- Vermittler: Cloudflare Worker (`worker/worker.js`, wird in Cloudflare eingefügt, NICHT auf GitHub Pages benötigt). Der Gemini-Schlüssel liegt nur dort als geheime Variable `GEMINI_API_KEY`. Der Worker prüft Herkunft (`https://madtillo.github.io`), App-Passwort (`APP_TOKEN`) und erlaubte Modelle.
+- Die App speichert nur Worker-Adresse und App-Passwort lokal (Sammlung `settings`, nicht Teil der Sicherung).
+- Gesendet wird ein auf max. 1280 px verkleinertes JPEG (ohne Metadaten) plus Auftragstext – erst nach Tippen auf „Analysieren“. Das Foto wird nicht gespeichert.
+- Die KI liefert Bestandteile, Zustand (roh/gegart) und geschätzte Gramm. Nährwerte pro 100 g kommen aus der BLS-Datenbank, KI-Richtwerte nur als gekennzeichneter Ersatz.
+- Jede KI-Antwort wird geprüft (`Nutri.mealValidate`): unplausible Mengen und Werte werden verworfen.
+- Gespeichert wird als normaler Tageseintrag mit `src: "photo"`, `mealId`, `cat`, `fraction` und allen Bestandteilen. Dadurch lässt sich der Eintrag später bearbeiten.
+- Tests: `tests/meal.test.js` (Logik), `tests/worker.test.mjs` (Worker-Schutz), `tests/photo_e2e.py` (Ablauf über den lokal gestarteten Worker mit nachgestellten Gemini-Antworten).

@@ -219,7 +219,143 @@
     };
   }
 
-  const api = { KEYS, EXTRA, parseNum, validAmount, eanValid, cleanCode, parseQuantity, normalizeOff, effective, unitOptions, calc, makeEntry, fmt, fmtQty, r1, KJ_PER_KCAL };
+  /* ================= Foto-Mahlzeiten =================
+     Grundsatz: Die KI liefert nur WAS (Name, Zustand) und WIE VIEL (geschätzte Gramm).
+     Nährwerte pro 100 g kommen bevorzugt aus der BLS-Datenbank; KI-Richtwerte nur als markierter Ersatz. */
+  const STATES = ["roh", "gegart", "zubereitet", "unbekannt"];
+  const CONF = ["hoch", "mittel", "niedrig"];
+  const MAX_ITEMS = 12, MAX_Q = 3, MAX_OPT = 4;
+  const str = (v, n) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, n || 80) : "");
+  const finite = (v) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" ? parseNum(v) : null);
+  const clamp = (v, lo, hi) => (v == null || v < lo || v > hi ? null : v);
+
+  /* Nährwerte pro 100 g plausibel? (kcal 0–900, Makros 0–100 g, Summe Makros ≤ 105 g) */
+  function validPer100(o) {
+    if (!o) return null;
+    const v = { kcal: clamp(finite(o.kcal), 0, 900), p: clamp(finite(o.p), 0, 100), c: clamp(finite(o.c), 0, 100), f: clamp(finite(o.f), 0, 100) };
+    if (KEYS.some((k) => v[k] == null)) return null;
+    if (v.p + v.c + v.f > 105) return null;
+    return v;
+  }
+
+  /* KI-Antwort prüfen und bereinigen. Alles Unplausible fliegt raus statt geraten zu werden. */
+  function mealValidate(raw) {
+    let o = raw;
+    if (typeof o === "string") { try { o = JSON.parse(o); } catch (_) { return { ok: false, error: "Die Antwort der KI war nicht lesbar." }; } }
+    if (!o || typeof o !== "object") return { ok: false, error: "Die Antwort der KI war leer." };
+    const isFood = o.is_food === true;
+    const items = [];
+    (Array.isArray(o.items) ? o.items : []).slice(0, MAX_ITEMS).forEach((it) => {
+      if (!it || typeof it !== "object") return;
+      const name = str(it.name, 60); if (!name) return;
+      let g = clamp(finite(it.grams_estimate), 1, 2000); if (g == null) return;
+      let gmin = clamp(finite(it.grams_min), 0, 2000), gmax = clamp(finite(it.grams_max), 0, 3000);
+      if (gmin == null || gmin > g) gmin = null; if (gmax == null || gmax < g) gmax = null;
+      const state = STATES.includes(it.state) ? it.state : "unbekannt";
+      items.push({
+        name, state, grams: Math.round(g), gramsMin: gmin == null ? null : Math.round(gmin), gramsMax: gmax == null ? null : Math.round(gmax),
+        confidence: CONF.includes(it.confidence) ? it.confidence : "niedrig",
+        visible: it.visible !== false,
+        terms: (Array.isArray(it.search_terms) ? it.search_terms : []).map((t) => str(t, 40)).filter(Boolean).slice(0, 5),
+        aiPer100: validPer100({ kcal: it.kcal_per_100g, p: it.protein_per_100g, c: it.carbs_per_100g, f: it.fat_per_100g })
+      });
+    });
+    const questions = [];
+    (Array.isArray(o.questions) ? o.questions : []).slice(0, MAX_Q).forEach((q, qi) => {
+      const text = str(q && q.text, 140); if (!text) return;
+      const options = (Array.isArray(q.options) ? q.options : []).slice(0, MAX_OPT).map((op) => {
+        const label = str(op && op.label, 50); if (!label) return null;
+        const add = op.add_item && str(op.add_item.name, 60) ? {
+          name: str(op.add_item.name, 60), grams: clamp(finite(op.add_item.grams), 1, 300),
+          state: "zubereitet", terms: [str(op.add_item.name, 40)],
+          aiPer100: validPer100({ kcal: op.add_item.kcal_per_100g, p: op.add_item.protein_per_100g, c: op.add_item.carbs_per_100g, f: op.add_item.fat_per_100g })
+        } : null;
+        if (add && add.grams == null) return null;
+        return { label, add };
+      }).filter(Boolean);
+      if (options.length >= 2) questions.push({ id: "q" + qi, text, options });
+    });
+    if (isFood && !items.length) return { ok: true, isFood: false, message: "Auf dem Foto wurde kein Essen sicher erkannt.", items: [], questions: [] };
+    return { ok: true, isFood: isFood && items.length > 0, dish: str(o.dish, 60), message: str(o.message, 200), items, questions };
+  }
+
+  /* Werte eines Bestandteils für seine Grammzahl. Fehlende Bezugswerte → null (nie 0). */
+  function mealItemValues(item) {
+    const g = typeof item.grams === "number" && item.grams > 0 ? item.grams : null;
+    const per = item.per100;
+    const out = {};
+    KEYS.forEach((k) => { out[k] = g == null || !per || per[k] == null ? null : (per[k] * g) / 100; });
+    return out;
+  }
+
+  /* Summe der Mahlzeit × gegessener Anteil. complete=false, sobald irgendwo ein Wert fehlt. */
+  function mealTotals(items, fraction) {
+    const fr = typeof fraction === "number" && fraction > 0 && fraction <= 1 ? fraction : 1;
+    const t = { kcal: 0, p: 0, c: 0, f: 0 }; const missing = [];
+    items.forEach((it, i) => { const v = mealItemValues(it); KEYS.forEach((k) => { if (v[k] == null) { if (!missing.includes(i)) missing.push(i); } else t[k] += v[k]; }); });
+    KEYS.forEach((k) => (t[k] = t[k] * fr));
+    return { values: t, complete: missing.length === 0 && items.length > 0, missing, fraction: fr };
+  }
+
+  /* Eintrag für die Tagesliste (Momentaufnahme inkl. aller Bestandteile, damit er später bearbeitbar ist). */
+  function makeMealEntry(meal) {
+    const tot = mealTotals(meal.items, meal.fraction);
+    if (!meal.items.length) return { ok: false, error: "Die Mahlzeit hat keine Bestandteile." };
+    if (!tot.complete) return { ok: false, error: "Bei mindestens einem Bestandteil fehlen Nährwerte oder die Menge." };
+    const names = meal.items.map((i) => i.name);
+    const title = (meal.title && meal.title.trim()) || (names.slice(0, 3).join(", ") + (names.length > 3 ? " …" : ""));
+    const pct = Math.round(tot.fraction * 100);
+    return { ok: true, entry: {
+      name: "📷 " + title + (pct < 100 ? " · " + pct + " %" : ""),
+      kcal: r1(tot.values.kcal), p: r1(tot.values.p), f: r1(tot.values.f), c: r1(tot.values.c),
+      src: "photo", mealId: meal.mealId, cat: meal.cat || null, fraction: tot.fraction, estimated: true,
+      items: meal.items.map((i) => ({ name: i.name, grams: i.grams, state: i.state || "unbekannt", per100: i.per100, source: i.source || "ki", blsCode: i.blsCode || null, blsName: i.blsName || null }))
+    } };
+  }
+
+  /* Suche in der Nährwert-Datenbank (BLS). Zeilen: [code, name, kcal, p, f, c]. */
+  const norm = (s) => String(s || "").toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const COOKED = ["gekocht", "gegart", "gebraten", "geduenstet", "gegrillt", "gebacken", "zubereitet", "gedaempft", "geschmort", "pochiert"];
+  /* Alltagswörter → Schreibweise im BLS (z. B. "Nudeln" heißen dort "Teigwaren") */
+  const SYN = {
+    brokkoli: "broccoli", nudeln: "teigwaren", nudel: "teigwaren", pasta: "teigwaren", spaghetti: "teigwaren", penne: "teigwaren", fusilli: "teigwaren",
+    haferflocken: "hafer flocken", hackfleisch: "rind hackfleisch", hack: "rind hackfleisch", rinderhack: "rind hackfleisch", rinderhackfleisch: "rind hackfleisch", schweinehack: "schwein hackfleisch", gemischtes: "schwein",
+    magerquark: "speisequark magerstufe", quark: "speisequark", salat: "kopfsalat", blattsalat: "kopfsalat", gruener: "",
+    haehnchenbrust: "haehnchen brust", haehnchenbrustfilet: "haehnchen brustfilet", huehnerbrust: "haehnchen brust", putenbrust: "pute brust",
+    ei: "eier", eier: "eier", spiegelei: "spiegelei", ruehrei: "ruehrei", kartoffeln: "kartoffel", salzkartoffeln: "kartoffel gekocht",
+    lachsfilet: "lachs", rindersteak: "rind", olivenoel: "olivenoel", sahne: "schlagsahne", joghurt: "joghurt", tomaten: "tomate", moehren: "moehre", karotten: "moehre", karotte: "moehre", paprika: "paprika"
+  };
+  const expand = (words) => words.flatMap((w) => (SYN[w] != null ? SYN[w].split(" ").filter(Boolean) : [w]));
+  function foodSearch(rows, query, opts) {
+    opts = opts || {};
+    const qWords = expand(norm(query).split(" ").filter((w) => w.length > 1));
+    if (!rows || !qWords.length) return [];
+    const qFull = qWords.join(" ");
+    const extra = expand((opts.terms || []).map(norm).join(" ").split(" ").filter((w) => w.length > 2));
+    const out = [];
+    for (const r of rows) {
+      const n = r._n || (r._n = norm(r[1]));
+      const toks = r._t || (r._t = n.split(" "));
+      let s = 0, hits = 0;
+      for (const w of qWords) { if (n.includes(w)) { hits++; s += toks[0].startsWith(w) ? 6 : 3; if (toks.includes(w)) s += 3; } }
+      let xh = 0;
+      for (const w of extra) if (n.includes(w)) { xh++; s += toks.includes(w) ? 3 : 2; }
+      if (!hits && !xh) continue;
+      if (hits === qWords.length) s += 4;
+      if (n.startsWith(qFull)) s += 8;                       // Grundlebensmittel zuerst ("Reis ..." vor "Reisnudeln ...")
+      if (toks[0] === qWords[0]) s += 4;
+      const cooked = COOKED.some((c) => n.includes(c));
+      if (opts.state === "gegart" || opts.state === "zubereitet") s += cooked ? 3 : 0;
+      if (opts.state === "roh") s += cooked ? -3 : (n.includes("roh") ? 3 : 1);
+      if (/ mit | in /.test(" " + n + " ") && !/ mit | in /.test(" " + qFull + " ")) s -= 5; // Gerichte nach hinten
+      s -= n.length / 40;                                   // kürzere, allgemeinere Namen bevorzugen
+      out.push([s, r]);
+    }
+    return out.sort((a, b) => b[0] - a[0]).slice(0, opts.limit || 8).map((x) => x[1]);
+  }
+
+  const api = { KEYS, EXTRA, parseNum, validAmount, eanValid, cleanCode, parseQuantity, normalizeOff, effective, unitOptions, calc, makeEntry, fmt, fmtQty, r1, KJ_PER_KCAL,
+    validPer100, mealValidate, mealItemValues, mealTotals, makeMealEntry, foodSearch, normText: norm };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.Nutri = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
