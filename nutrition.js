@@ -354,8 +354,119 @@
     return out.sort((a, b) => b[0] - a[0]).slice(0, opts.limit || 8).map((x) => x[1]);
   }
 
+
+  /* ================= Rezepte =================
+     Zutat: { n, a, u, g, v:[kcal,p,f,c] pro 100 g bzw. 100 ml, basis, x }  g = Menge in g (bzw. ml bei basis "ml") für die Rechnung.
+     x = 1: Gewürz/Kräuter in kleiner Menge – wird angezeigt, aber bewusst nicht eingerechnet.
+     Fehlt g oder ein Wert in v, ist die Zutat „unvollständig“ – sie zählt NICHT als 0, das Rezept gilt dann als unvollständig. */
+  const RKEYS = ["kcal", "p", "f", "c"];
+  function ingValues(ing, factor) {
+    if (!ing || ing.x) return null;
+    const g = finite(ing.g);
+    if (g == null || g < 0 || !Array.isArray(ing.v)) return { missing: true };
+    const out = {}; let miss = false;
+    RKEYS.forEach((k, i) => { const v = finite(ing.v[i]); if (v == null || v < 0) { out[k] = null; miss = true; } else out[k] = v * g * (factor || 1) / 100; });
+    out.missing = miss; return out;
+  }
+  /* Gesamtwerte für das Rezept, skaliert mit factor (= zubereitete Portionen / Grundportionen). */
+  function recipeTotals(recipe, factor) {
+    const f = typeof factor === "number" && factor > 0 ? factor : 1;
+    const t = { kcal: 0, p: 0, f: 0, c: 0 }; const missing = []; let counted = 0, spices = 0;
+    (recipe && recipe.ing || []).forEach((ing, i) => {
+      if (ing.x) { spices++; return; }
+      const v = ingValues(ing, f);
+      if (!v || v.missing) { missing.push(i); }
+      if (v) RKEYS.forEach((k) => { if (v[k] != null) t[k] += v[k]; });
+      counted++;
+    });
+    return { total: t, complete: missing.length === 0 && counted > 0, missing, counted, spices };
+  }
+  /* Werte für EINE Portion – unabhängig davon, wie viele Portionen zubereitet werden. */
+  function recipePerServing(recipe) {
+    const s = finite(recipe && recipe.s);
+    const r = recipeTotals(recipe, 1);
+    const per = {}; RKEYS.forEach((k) => (per[k] = s > 0 ? r.total[k] / s : null));
+    return { per, complete: r.complete && s > 0, missing: r.missing };
+  }
+  /* Proteinreich: mind. 25 g Eiweiß pro Portion UND mind. 25 % der Kalorien aus Eiweiß (1 g Eiweiß = 4 kcal). */
+  function isHighProtein(per) { return !!per && per.p >= 25 && per.kcal > 0 && (per.p * 4) / per.kcal >= 0.25; }
+
+  /* Mengen sinnvoll runden: g/ml nach Größe, Stück/EL/TL auf Viertel. Keine Umrechnung zwischen Einheiten. */
+  const FRAC = { 0.25: "¼", 0.5: "½", 0.75: "¾" };
+  function roundAmount(a, unit) {
+    const v = finite(a); if (v == null) return null;
+    if (unit === "g" || unit === "ml") return v < 10 ? Math.round(v * 10) / 10 : v < 100 ? Math.round(v) : v < 500 ? Math.round(v / 5) * 5 : Math.round(v / 10) * 10;
+    return Math.max(0.25, Math.round(v * 4) / 4);
+  }
+  function fmtAmount(a, unit) {
+    const v = roundAmount(a, unit); if (v == null) return "";
+    if (unit === "g" || unit === "ml") return String(v).replace(".", ",") + " " + unit;
+    const whole = Math.floor(v), rest = Math.round((v - whole) * 100) / 100;
+    const num = (whole ? String(whole) : "") + (FRAC[rest] ? (whole ? " " : "") + FRAC[rest] : rest ? String(rest).replace(".", ",") : "");
+    return (num || "0") + (unit ? " " + unit : "");
+  }
+  function scaleIngredient(ing, factor) {
+    const f = factor > 0 ? factor : 1;
+    const a = finite(ing.a), g = finite(ing.g);
+    return Object.assign({}, ing, { a: a == null ? null : a * f, g: g == null ? null : g * f });
+  }
+
+  /* Suche: Titel, Beschreibung und Zutaten; Umlaute und Groß-/Kleinschreibung egal. */
+  function recipeText(r) { return r._s || (r._s = norm([r.t, r.d].concat((r.ing || []).map((i) => i.n)).join(" "))); }
+  function recipeMatches(r, query) {
+    const w = norm(query || "").split(" ").filter(Boolean);
+    if (!w.length) return true;
+    const txt = recipeText(r);
+    return w.every((x) => txt.includes(x));
+  }
+  /* Ausgeschlossene Zutaten (kommagetrennt). Prüft nur Zutatennamen – keine Allergen-Garantie. */
+  function recipeExcluded(r, excl) {
+    const list = String(excl || "").split(/[,;]/).map((x) => norm(x)).filter((x) => x.length > 1);
+    if (!list.length) return false;
+    const names = (r.ing || []).map((i) => norm(i.n + " " + (i.bn || ""))).join(" | ");
+    return list.some((x) => names.includes(x));
+  }
+
+  /* Tagebuch-Eintrag: Momentaufnahme der Werte. Spätere Rezeptänderungen ändern ihn nicht. */
+  function makeRecipeEntry(recipe, portions, opts) {
+    opts = opts || {};
+    const n = finite(portions);
+    if (n == null || n <= 0 || n > 20) return { ok: false, error: "Bitte eine gültige Portionszahl angeben (z. B. 1 oder 1,5)." };
+    const ps = recipePerServing(recipe);
+    if (!ps.complete) return { ok: false, error: "Bei mindestens einer Zutat fehlen Menge oder Nährwerte. Bitte im Rezept ergänzen." };
+    const v = {}; RKEYS.forEach((k) => (v[k] = r1(ps.per[k] * n)));
+    const per = {}; RKEYS.forEach((k) => (per[k] = r1(ps.per[k])));
+    const pl = String(r1(n)).replace(".", ",") + (n === 1 ? " Portion" : " Portionen");
+    return { ok: true, entry: Object.assign({ name: "🍽 " + recipe.t + " · " + pl, kcal: v.kcal, p: v.p, f: v.f, c: v.c, src: "recipe", recipeId: recipe.id, recipeTitle: recipe.t,
+      portions: r1(n), per, mealId: opts.mealId || ("r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)) }, opts.cat ? { cat: opts.cat } : {}) };
+  }
+
+  /* Eigenes Rezept prüfen und bereinigen, bevor es gespeichert wird. */
+  function cleanRecipe(r) {
+    const t = str(r && r.t, 80);
+    if (!t) return { ok: false, error: "Bitte einen Titel eingeben." };
+    const s = finite(r.s); if (s == null || s <= 0 || s > 50) return { ok: false, error: "Bitte eine Portionszahl zwischen 1 und 50 angeben." };
+    const ing = (Array.isArray(r.ing) ? r.ing : []).map((i) => {
+      const o = { n: str(i.n, 80), a: finite(i.a), u: str(i.u, 20) || "g" };
+      if (!o.n) return null;
+      if (i.x) { o.x = 1; return o; }
+      o.g = finite(i.g); if (o.g != null && (o.g < 0 || o.g > 20000)) o.g = null;
+      o.basis = i.basis === "ml" ? "ml" : "g";
+      o.v = Array.isArray(i.v) ? i.v.slice(0, 4).map((x) => { const v = finite(x); return v == null || v < 0 || v > 1000 ? null : v; }) : null;
+      ["src", "b", "bn", "code"].forEach((k) => { if (i[k] != null) o[k] = String(i[k]).slice(0, 120); });
+      return o;
+    }).filter(Boolean);
+    if (!ing.length) return { ok: false, error: "Bitte mindestens eine Zutat hinzufügen." };
+    const st = (Array.isArray(r.st) ? r.st : []).map((x) => str(x, 600)).filter(Boolean);
+    const cats = (Array.isArray(r.cat) ? r.cat : []).filter((c) => ["fruehstueck", "mittag", "abend", "snack"].includes(c));
+    const num = (x) => { const v = finite(x); return v == null || v < 0 || v > 1440 ? null : Math.round(v); };
+    return { ok: true, recipe: { id: String(r.id), t, d: str(r.d, 300), cat: cats, s, prep: num(r.prep), cook: num(r.cook), veg: !!r.veg, vegan: !!r.vegan, ing, st,
+      own: true, basedOn: r.basedOn || null } };
+  }
+
   const api = { KEYS, EXTRA, parseNum, validAmount, eanValid, cleanCode, parseQuantity, normalizeOff, effective, unitOptions, calc, makeEntry, fmt, fmtQty, r1, KJ_PER_KCAL,
-    validPer100, mealValidate, mealItemValues, mealTotals, makeMealEntry, foodSearch, normText: norm };
+    validPer100, mealValidate, mealItemValues, mealTotals, makeMealEntry, foodSearch, normText: norm,
+    recipeTotals, recipePerServing, isHighProtein, roundAmount, fmtAmount, scaleIngredient, recipeMatches, recipeExcluded, makeRecipeEntry, cleanRecipe };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.Nutri = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

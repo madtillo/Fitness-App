@@ -1,14 +1,14 @@
 /* Offline-Betrieb: App-Dateien werden auf dem Gerät zwischengespeichert.
    Strategie „zuerst Netz“: Mit Internet lädt die App immer die aktuelle Version,
    ohne Internet die zuletzt gespeicherte. Open-Food-Facts-Anfragen gehen nie über den Cache. */
-const CACHE = "tills-fitness-v13";
+const CACHE = "tills-fitness-v14";
 const SHELL = [
   "./", "index.html", "manifest.webmanifest",
-  "app-extra.css", "localdb.js", "nutrition.js", "scan.js", "app.js", "docs.js", "photo.js",
+  "app-extra.css", "localdb.js", "nutrition.js", "scan.js", "app.js", "docs.js", "photo.js", "recipes.js",
   "barcode-detector-ponyfill.js", "zxing_reader.wasm",
   "icon-192.png", "icon-512.png", "apple-touch-icon.png"
 ];
-const OPTIONAL = ["bls.js"];
+const OPTIONAL = ["bls.js", "recipes-data.js"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: "reload" })))

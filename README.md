@@ -17,12 +17,14 @@ enthält nur den Programmcode, keine persönlichen Daten.
 | `docs.js` | Ausführliche Erklärungen (Trainings- und Ernährungsplan, Stand 15.10.2026) für das Buch-Symbol oben rechts |
 | `photo.js` | Foto-Mahlzeit: Foto → Analyse mit Google Gemini (Schlüssel nur auf dem Gerät) → Prüfen/Korrigieren → Speichern |
 | `bls.js` | Nährwert-Datenbank Bundeslebensmittelschlüssel 4.0 (optional, aus der offiziellen Excel-Datei erzeugt) |
+| `recipes.js` | Rezeptbereich: Suche, Filter, Portionsrechner, Favoriten, eigene Rezepte, „Zum Tagebuch“ |
+| `recipes-data.js` | Rezeptbibliothek (40 KI-erstellte Rezepte, Nährwerte aus BLS berechnet), erzeugt mit `tests/build_recipes.py`, wird erst beim Öffnen des Tabs geladen |
 | `sw.js` | Service Worker: App-Dateien offline verfügbar |
 
 ## Daten
 
 Die Sammlungen `sessions`, `daily`, `weekly` und `food` sind unverändert aus der Claude-Version übernommen.
-Neu hinzugekommen ist `products`.
+Neu hinzugekommen sind `products`, `recipes` (eigene Rezepte) und `recipeFavs` (Favoriten). Alle sind Teil der Sicherung.
 
 - **`products/<barcode>`**: `code` (immer als Text, damit führende Nullen erhalten bleiben), `name`, `brand`, `basis` (`g`/`ml`),
   `per100`, `perServing`, `prepared100` (je kcal/p/c/f/sugar/fiber/salt, fehlende Werte = `null`), `servingQty`, `packQty`,
@@ -70,11 +72,22 @@ Die App zeigt dann „Neue Version verfügbar“ an.
 
 ## Foto-Mahlzeiten
 
-- Analyse: Google Gemini API (`generateContent`, Modell `gemini-3.8-flash`, Ersatz `gemini-3.5-flash-lite`), kostenloses Kontingent.
+- Analyse: Google Gemini API (`generateContent`, Modell `gemini-3.5-flash-lite` (schnell), Ersatz `gemini-3.8-flash` mit begrenztem Denken), kostenloses Kontingent.
 - Vermittler: Cloudflare Worker (`worker/worker.js`, wird in Cloudflare eingefügt, NICHT auf GitHub Pages benötigt). Der Gemini-Schlüssel liegt nur dort als geheime Variable `GEMINI_API_KEY`. Der Worker prüft Herkunft (`https://madtillo.github.io`), App-Passwort (`APP_TOKEN`) und erlaubte Modelle.
 - Die App speichert nur Worker-Adresse und App-Passwort lokal (Sammlung `settings`, nicht Teil der Sicherung).
-- Gesendet wird ein auf max. 1280 px verkleinertes JPEG (ohne Metadaten) plus Auftragstext – erst nach Tippen auf „Analysieren“. Das Foto wird nicht gespeichert.
+- Gesendet wird ein auf max. 1024 px verkleinertes JPEG (ohne Metadaten) plus Auftragstext – erst nach Tippen auf „Analysieren“. Das Foto wird nicht gespeichert.
 - Die KI liefert Bestandteile, Zustand (roh/gegart) und geschätzte Gramm. Nährwerte pro 100 g kommen aus der BLS-Datenbank, KI-Richtwerte nur als gekennzeichneter Ersatz.
 - Jede KI-Antwort wird geprüft (`Nutri.mealValidate`): unplausible Mengen und Werte werden verworfen.
 - Gespeichert wird als normaler Tageseintrag mit `src: "photo"`, `mealId`, `cat`, `fraction` und allen Bestandteilen. Dadurch lässt sich der Eintrag später bearbeiten.
 - Tests: `tests/meal.test.js` (Logik), `tests/worker.test.mjs` (Worker-Schutz), `tests/photo_e2e.py` (Ablauf über den lokal gestarteten Worker mit nachgestellten Gemini-Antworten).
+
+## Rezepte
+
+- Bibliothek: 40 KI-erstellte Rezepte (je ≥ 10 für Frühstück, Mittag/Meal Prep, Abend, Snack), als „KI-erstellt“ gekennzeichnet.
+- Nährwerte: aus Grammangaben × BLS 4.0 pro 100 g berechnet. Gewürze in kleinen Mengen werden angezeigt, aber nicht eingerechnet. Fehlende Werte zählen nie als 0 („unvollständig“, „Zum Tagebuch“ gesperrt).
+- Einheiten: Stück/EL/TL usw. werden nie automatisch in Gramm umgerechnet – jede Zutat hat eine feste, sichtbare Gramm-Angabe (≈ … g).
+- Portionen: „Zubereiten für“ skaliert Zutaten und Gesamtwerte, die Werte pro Portion bleiben gleich. „Gegessen“ in halben Schritten.
+- Tagebuch: Eintrag mit `src: "recipe"`, `recipeId`, `portions`, `per` (Werte pro Portion) – Momentaufnahme, spätere Rezeptänderungen ändern ihn nicht.
+- Bibliotheksrezepte bearbeiten → eigene Variante (`basedOn`), das Original bleibt unverändert.
+- „Proteinreich“ = mind. 25 g Eiweiß pro Portion und mind. 25 % der Kalorien aus Eiweiß.
+- Tests: `tests/recipe.test.js` (Logik), `tests/recipes_e2e.py` (Ablauf im Browser).

@@ -16,7 +16,7 @@
   const UNIT = { kcal: "kcal", p: "g", c: "g", f: "g", sugar: "g", fiber: "g", salt: "g" };
 
   let db = null;
-  const st = { view: "idle", code: null, prod: null, unitKey: "base", prepared: false, busy: false, stream: null, timer: null, lastHit: null, hits: 0, reqTimes: [], adding: false, editFor: null };
+  const st = { view: "idle", code: null, prod: null, unitKey: "base", prepared: false, busy: false, stream: null, timer: null, lastHit: null, hits: 0, reqTimes: [], adding: false, editFor: null, pickCb: null };
 
   /* ---------- Gerüst ---------- */
   function sheetHTML() {
@@ -40,13 +40,20 @@
   const cancelRow = (extra) => `<div class="sc-row">${extra || ""}${btn("close", "Abbrechen", "ghost")}</div>`;
 
   function open() {
+    st.pickCb = null;
     $("scanSheet").hidden = false; document.body.style.overflow = "hidden";
     startCamera();
   }
   function close() {
     stopCamera();
     $("scanSheet").hidden = true; document.body.style.overflow = "";
-    st.view = "idle"; st.busy = false; st.adding = false; st.code = null; st.prod = null;
+    st.view = "idle"; st.busy = false; st.adding = false; st.code = null; st.prod = null; st.pickCb = null;
+  }
+  /* Auswahl-Modus für Rezepte: Produkt scannen → Menge → als Zutat zurückgeben (kein Tagebuch-Eintrag). */
+  function pick(cb) {
+    $("scanSheet").hidden = false; document.body.style.overflow = "hidden";
+    st.pickCb = typeof cb === "function" ? cb : null;
+    startCamera();
   }
 
   /* ---------- Kamera ---------- */
@@ -276,7 +283,7 @@
          <div class="sc-seg" role="group" aria-label="Einheit">${opts.map((o) => `<button type="button" data-unit="${o.key}" aria-pressed="${o.key === st.unitKey}">${esc(o.label)}</button>`).join("")}</div></div>
          <div id="scanCalc" class="sc-calc"></div></div>` : ""}
        <p class="sc-attr">${prod.source === "own" ? "" : "Daten: Open Food Facts (ODbL), Bild: CC BY-SA. "}Werte vor dem Übernehmen kurz mit der Packung vergleichen.</p>`,
-      `${canCalc ? btn("add", "Übernehmen", "primary") : ""}<div class="sc-row">${btn("edit", "Werte korrigieren", "ghost")}${btn("rescan", "Erneut scannen", "ghost")}</div>${cancelRow(prod.source !== "own" ? btn("refresh", "Daten neu laden", "ghost small") : "")}`,
+      `${canCalc ? btn("add", st.pickCb ? "Als Zutat übernehmen" : "Übernehmen", "primary") : ""}<div class="sc-row">${btn("edit", "Werte korrigieren", "ghost")}${btn("rescan", "Erneut scannen", "ghost")}</div>${cancelRow(prod.source !== "own" ? btn("refresh", "Daten neu laden", "ghost small") : "")}`,
       "Produkt prüfen");
     updateCalc();
   }
@@ -300,6 +307,15 @@
     const amt = currentAmount();
     const res = N.makeEntry(st.prod, st.unitKey, amt, st.prepared);
     if (!res.ok) return updateCalc();
+    if (st.pickCb) {                       // Rezept-Zutat statt Tagebuch-Eintrag
+      if (res.entry.qty == null) { $("scanCalc").insertAdjacentHTML("beforeend", `<p class="sc-err">Für Rezepte braucht das Produkt Werte pro 100 g bzw. 100 ml und eine Menge in g/ml.</p>`); return; }
+      const e = N.effective(st.prod); const per = (st.prepared ? e.prepared100 : e.per100) || {};
+      const ing = { n: [e.brand, e.name].filter(Boolean).join(" ") || "Produkt " + st.prod.code, a: res.entry.qty, u: res.entry.basis === "100ml" ? "ml" : "g",
+        g: res.entry.qty, basis: res.entry.basis === "100ml" ? "ml" : "g", v: [per.kcal, per.p, per.f, per.c].map((x) => (x == null ? null : x)), src: "product", code: st.prod.code };
+      const cb = st.pickCb;
+      if (db) db.collection("products").doc(st.prod.code).update({ lastUsed: { unitKey: st.unitKey, amount: amt, prepared: st.prepared, at: new Date().toISOString() } }).catch(() => {});
+      close(); cb(ing); return;
+    }
     st.adding = true;
     const b = document.querySelector('#scanFoot [data-act="add"]'); if (b) { b.disabled = true; b.textContent = "Wird gespeichert …"; }
     try {
@@ -396,7 +412,7 @@
   /* Von außen: Produkt aus „Zuletzt hinzugefügt“ öffnen (ohne Internet). */
   async function openProduct(code) {
     $("scanSheet").hidden = false; document.body.style.overflow = "hidden";
-    st.code = String(code); st.busy = false; st.adding = false;
+    st.code = String(code); st.busy = false; st.adding = false; st.pickCb = null;
     const snap = db ? await db.collection("products").doc(st.code).get() : null;
     if (snap && snap.exists) {
       const p = snap.data();
@@ -423,5 +439,5 @@
     window.claude.use("db").then((d) => { db = d; });
   }
 
-  window.Scanner = { init, open, close, openProduct, lookup, _state: st };
+  window.Scanner = { init, open, pick, close, openProduct, lookup, _state: st };
 })();

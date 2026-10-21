@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const VERSION = "1.2.5";
+  const VERSION = "1.3.0";
 
   function toast(msg) {
     const t = $("appToast"); t.textContent = msg; t.hidden = false;
@@ -38,7 +38,7 @@
     try {
       const ex = await window.LocalDB.exportAll();
       const c = ex.collections;
-      parts.push(`${c.sessions.length} Trainings · ${c.daily.length} Morgen-Checks · ${c.weekly.length} Wochen-Checks · ${c.food.length} Ernährungstage · ${c.products.length} Produkte`);
+      parts.push(`${c.sessions.length} Trainings · ${c.daily.length} Morgen-Checks · ${c.weekly.length} Wochen-Checks · ${c.food.length} Ernährungstage · ${c.products.length} Produkte · ${(c.recipes || []).length} eigene Rezepte · ${(c.recipeFavs || []).length} Rezept-Favoriten`);
     } catch (_) {}
     try {
       if (navigator.storage && navigator.storage.persisted) parts.push((await navigator.storage.persisted()) ? "Dauerhafter Speicher: aktiv" : "Dauerhafter Speicher: nicht bestätigt – regelmäßig sichern");
@@ -71,7 +71,7 @@
     try {
       const json = JSON.parse(await file.text());
       const s = await window.LocalDB.importAll(json);
-      const names = { sessions: "Trainings", daily: "Morgen-Checks", weekly: "Wochen-Checks", food: "Ernährungstage", products: "Produkte" };
+      const names = { sessions: "Trainings", daily: "Morgen-Checks", weekly: "Wochen-Checks", food: "Ernährungstage", products: "Produkte", recipes: "eigene Rezepte", recipeFavs: "Rezept-Favoriten" };
       out.textContent = "Fertig: " + Object.entries(s).map(([k, v]) => `${v.added} ${names[k]} neu${v.kept ? ` (${v.kept} schon vorhanden)` : ""}`).join(" · ");
       showInfo();
     } catch (e) { out.textContent = "Import fehlgeschlagen: " + (e && e.message ? e.message : "Datei nicht lesbar"); }
@@ -117,6 +117,7 @@
     $("dtFile").addEventListener("change", (e) => { const f = e.target.files && e.target.files[0]; if (f) doImport(f); });
     window.Scanner.init();
     window.PhotoMeal.init();
+    if (window.Recipes) window.Recipes.init();
     window.LocalDB.persist();
     registerSW();
   }

@@ -105,7 +105,7 @@
   }
 
   /* Sicherung & Umzug */
-  const COLLECTIONS = ["sessions", "daily", "weekly", "food", "products"];
+  const COLLECTIONS = ["sessions", "daily", "weekly", "food", "products", "recipes", "recipeFavs"];
   async function exportAll() {
     const out = { app: "tills-fitness", format: 1, exportedAt: new Date().toISOString(), collections: {} };
     for (const c of COLLECTIONS) out.collections[c] = (await allDocs(c)).map((r) => ({ id: r.id, data: r.data }));

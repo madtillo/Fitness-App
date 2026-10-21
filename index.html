@@ -21,6 +21,7 @@
 <script src="scan.js"></script>
 <script src="docs.js"></script>
 <script src="photo.js"></script>
+<script src="recipes.js"></script>
 <script src="app.js"></script>
 </head>
 <body>
@@ -413,14 +414,33 @@ body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px
 
 <!-- REZEPTE -->
 <section id="s-rezepte" hidden>
-  <ol class="steps" style="margin-top:8px">
-    <li>Sonntag 1 Rezept × 4 Portionen kochen (45–60 Min).</li>
-    <li>3 Boxen in den Kühlschrank (Mo–Mi), die 4. einfrieren.</li>
-    <li>Mittwochabend die Donnerstags-Box in den Kühlschrank legen.</li>
-    <li>Jede Woche ein anderes Rezept.</li>
-  </ol>
-  <div id="recipes" style="display:grid;gap:10px"></div>
-  <p class="foot" style="margin:0">Nährwerte pro Portion sind Schätzungen (±10 %).</p>
+  <div id="rezApp" class="rz-app">
+    <input id="rzQ" class="sc-in" type="search" placeholder="Rezept oder Zutat suchen" autocomplete="off" aria-label="Rezepte durchsuchen">
+    <div id="rzCats" class="sc-seg rz-chips" aria-label="Mahlzeit"><button type="button" data-rcat="" aria-pressed="true">Alle</button><button type="button" data-rcat="fruehstueck" aria-pressed="false">Frühstück</button><button type="button" data-rcat="mittag" aria-pressed="false">Mittag</button><button type="button" data-rcat="abend" aria-pressed="false">Abend</button><button type="button" data-rcat="snack" aria-pressed="false">Snack</button></div>
+    <div id="rzTog" class="sc-seg rz-chips" aria-label="Filter"><button type="button" data-tog="fav" aria-pressed="false">★ Favoriten</button><button type="button" data-tog="own" aria-pressed="false">Eigene</button><button type="button" data-tog="hp" aria-pressed="false">Proteinreich</button><button type="button" data-tog="veg" aria-pressed="false">Vegetarisch</button><button type="button" data-tog="vegan" aria-pressed="false">Vegan</button></div>
+    <details class="rz-more"><summary>Zeit, Kalorien, Sortierung, Zutaten ausschließen</summary>
+      <div class="sc-grid">
+        <label class="sc-f"><span>Zubereitungszeit</span><select id="rzTime" class="sc-in"><option value="0">egal</option><option value="15">bis 15 Min</option><option value="30">bis 30 Min</option><option value="60">bis 60 Min</option></select></label>
+        <label class="sc-f"><span>Kalorien pro Portion</span><select id="rzKcal" class="sc-in"><option value="0">egal</option><option value="300">bis 300 kcal</option><option value="500">bis 500 kcal</option><option value="700">bis 700 kcal</option></select></label>
+        <label class="sc-f wide"><span>Sortieren nach</span><select id="rzSort" class="sc-in"><option value="name">Name</option><option value="time">Zubereitungszeit</option><option value="kcal">Kalorien (wenig zuerst)</option><option value="protein">Eiweiß (viel zuerst)</option><option value="density">Eiweiß pro Kalorie</option></select></label>
+        <label class="sc-f wide"><span>Ohne diese Zutaten (mit Komma trennen)</span><input id="rzExcl" class="sc-in" placeholder="z. B. Zwiebel, Pilze" autocomplete="off"></label>
+      </div>
+      <p class="muted small">„Proteinreich“ = mind. 25 g Eiweiß pro Portion und mind. 25 % der Kalorien aus Eiweiß. „Ohne Zutaten“ prüft nur die Zutatennamen – das ist keine Allergen-Prüfung. Vegetarisch/vegan bei Bibliotheksrezepten anhand der Zutaten, bei eigenen Rezepten nach deiner Angabe.</p>
+    </details>
+    <button type="button" id="rzNew" class="sc-btn">+ Eigenes Rezept anlegen</button>
+    <p id="rzCount" class="muted small" style="margin:0"></p>
+    <div id="rzList" class="rz-list"></div>
+    <button type="button" id="rzMore" class="sc-btn ghost" hidden>Mehr anzeigen</button>
+    <details class="rz-more"><summary>So klappt Meal Prep</summary>
+      <ol class="steps" style="margin-top:8px">
+        <li>Sonntag 1 Rezept × 4 Portionen kochen (45–60 Min) – Filter „Mittag“.</li>
+        <li>3 Boxen in den Kühlschrank (Mo–Mi), die 4. einfrieren.</li>
+        <li>Mittwochabend die Donnerstags-Box in den Kühlschrank legen.</li>
+        <li>Jede Woche ein anderes Rezept.</li>
+      </ol>
+    </details>
+    <p class="foot" style="margin:0">Bibliothek: KI-erstellte Rezepte (Claude), Nährwerte aus dem Bundeslebensmittelschlüssel BLS 4.0 berechnet. Richtwerte, ±10–15 %.</p>
+  </div>
 </section>
 
 <!-- EINKAUF -->
@@ -705,12 +725,7 @@ const DAYS = {
     {t:"",h:"Supplemente",d:"Kreatin + Vitamin D irgendwann am Tag",p:0}
   ]
 };
-const RECIPES = [
-  {n:"Protein-Bolognese",kcal:690,p:46,min:40,ing:["500 g Rinderhack (5–10 % Fett)","400 g Vollkornspaghetti","1 Zwiebel, 2 Karotten, 1 Paprika","700 g passierte Tomaten, 2 EL Tomatenmark","1 EL Olivenöl, Oregano, Salz, Pfeffer","optional 40 g Parmesan"],st:["Gemüse klein würfeln, in Öl anbraten.","Hack dazu, krümelig braten, Tomatenmark kurz mitrösten.","Tomaten dazu, 20 Min köcheln lassen.","Nudeln kochen, alles auf 4 Boxen verteilen."]},
-  {n:"Hähnchen-Reis-Pfanne",kcal:560,p:44,min:30,ing:["600 g Hähnchenbrust","300 g Reis","600 g TK-Gemüse (Brokkoli/Paprika)","2 EL Öl, 4 EL Sojasauce","Knoblauch, Paprikapulver"],st:["Reis kochen.","Hähnchen würfeln und scharf anbraten.","Gemüse dazu, mit Sojasauce und Gewürzen ablöschen.","Fertige Asia-Soßen nur nach Etikett-Check (Nüsse)."]},
-  {n:"Chili con Carne",kcal:580,p:39,min:45,ing:["500 g Rinderhack","1 Dose Kidneybohnen, 1 kleine Dose Mais","1 Zwiebel, 1 Paprika","400 g gehackte Tomaten, 1 EL Tomatenmark","Chili, Kreuzkümmel, Paprika edelsüß","250 g Reis"],st:["Zwiebel und Paprika anbraten, Hack dazu.","Tomaten, Bohnen, Mais und Gewürze dazu.","25 Min köcheln lassen, Reis kochen.","Auf 4 Boxen verteilen."]},
-  {n:"Hähnchen-Nudelauflauf",kcal:610,p:50,min:45,ing:["350 g Penne","400 g Hähnchenbrust (oder Kochschinken)","500 g TK-Brokkoli","200 g Frischkäse light + 250 ml Milch 1,5 %","125 g Mozzarella light","Salz, Pfeffer, Muskat"],st:["Nudeln 2 Min kürzer kochen, Hähnchen anbraten.","Frischkäse mit Milch verrühren, würzen.","Alles in eine Form, Mozzarella drüber.","20 Min bei 200 °C backen, aufteilen."]}
-];
+
 const SHOP = [
   ["Eiweiß",["2–3 kg Skyr / Magerquark / griech. Joghurt (fettarm)","10 Eier","Putenbrust- & Kochschinken-Aufschnitt","1 Hüttenkäse","Fleisch fürs Meal-Prep-Rezept"]],
   ["Kohlenhydrate",["Vollkornbrot","Reis","Nudeln","Kartoffeln","Wraps","Haferflocken (Etikett prüfen)"]],
@@ -738,7 +753,6 @@ function renderDay(){
 }
 $("dayseg").addEventListener("click",e=>{const b=e.target.closest("button[data-d]");if(!b)return;day=b.dataset.d;renderDay();});
 
-$("recipes").innerHTML=RECIPES.map(r=>`<details class="rc"><summary><div class="row"><h3>${r.n}</h3><span class="more">Rezept ▾</span></div><div class="chips"><span class="chip pr">${r.p} g Eiweiß</span><span class="chip">${r.kcal} kcal</span><span class="chip">${r.min} Min</span><span class="chip">4 Portionen</span></div></summary><div class="body"><ul>${r.ing.map(i=>`<li>${i}</li>`).join("")}</ul><ol class="steps">${r.st.map(s=>`<li>${s}</li>`).join("")}</ol></div></details>`).join("");
 
 let checked={}; try{checked=JSON.parse(localStorage.getItem("shop")||"{}")}catch(e){}
 function renderShop(){
