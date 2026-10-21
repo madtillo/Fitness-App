@@ -170,6 +170,3 @@ body{padding-bottom:calc(48px + env(safe-area-inset-bottom,0px))}
 .ph-res span{font-size:.78rem;color:var(--muted);font-family:var(--mono)}
 .sc-btn:disabled{opacity:.45}
 
-.ph-cmp{background:var(--soft);border-radius:12px;padding:10px 12px;line-height:1.45;overflow-wrap:anywhere}
-.ph-cmp .sc-btn{margin-top:6px}
-.ph-bad{color:#c0392b}
